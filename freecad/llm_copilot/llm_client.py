@@ -532,17 +532,16 @@ def _base_url(settings: Settings, provider: str) -> str:
 def _openai_reasoning(message: dict) -> str:
     """Best-effort reasoning extraction from an OpenAI-style message. Different
     providers/models expose it under different keys (or not at all)."""
-    r = message.get("reasoning") or message.get("reasoning_content")
-    if isinstance(r, str):
-        return r
+    reasoning = message.get("reasoning") or message.get("reasoning_content")
+    if isinstance(reasoning, str):
+        return reasoning
     # OpenRouter can return structured reasoning_details: [{text/summary}, ...]
     details = message.get("reasoning_details")
     if isinstance(details, list):
-        parts = []
-        for d in details:
-            if isinstance(d, dict):
-                parts.append(d.get("text") or d.get("summary") or "")
-        return "\n".join(p for p in parts if p)
+        parts = [
+            detail.get("text") or detail.get("summary") or ""
+            for detail in details if isinstance(detail, dict)]
+        return "\n".join(part for part in parts if part)
     return ""
 
 
@@ -566,6 +565,45 @@ def _question_proposal(args, reasoning=""):
         recommended_option=str(
             args.get("recommended_option", "")).strip(),
         allow_multiple=bool(args.get("allow_multiple")))
+
+
+def _proposal_from_tool(name, args, reasoning="", text=""):
+    """Build the LLMProposal for one tool call, provider-independent.
+
+    Both the OpenAI-compatible and Anthropic adapters reduce their wire format
+    to a ``(name, args)`` pair and hand off here, so the five proposal shapes
+    are constructed in exactly one place. Returns ``None`` for an unrecognized
+    tool name; the caller decides how to handle that (treat text as a finish).
+    """
+    args = args or {}
+    if name == _TOOL_NAME:
+        return LLMProposal(
+            intent=args.get("intent", ""), script=args.get("script", ""),
+            text=text, is_tool_call=True, reasoning=reasoning, kind="script",
+            strategy=args.get("strategy", ""), stage=args.get("stage", ""),
+            plan=tuple(args.get("plan") or ()),
+            plan_step=int(args.get("plan_step") or 0),
+            success_criteria=tuple(args.get("success_criteria") or ()))
+    if name == _FINISH_NAME:
+        return LLMProposal(
+            intent="", script="", text=args.get("summary", "") or text,
+            is_tool_call=False, reasoning=reasoning, kind="finish",
+            verified=bool(args.get("verified")),
+            evidence=tuple(args.get("evidence") or ()),
+            reviewed_plan=bool(args.get("reviewed_plan")))
+    if name == _INSPECT_NAME:
+        return LLMProposal(
+            "", "", "", False, reasoning=reasoning, kind="inspect",
+            query=args.get("query", ""))
+    if name == _QUESTION_NAME:
+        return _question_proposal(args, reasoning)
+    if name == _API_NAME:
+        return LLMProposal(
+            "", "", "", False, reasoning=reasoning, kind="api_lookup",
+            api_query=str(args.get("query", "")),
+            api_module=str(args.get("module", "FreeCAD")),
+            api_symbol=str(args.get("symbol", "")))
+    return None
 
 
 def _complete_openai(wire_model: str, provider: str, messages: list,
@@ -596,40 +634,10 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
         fn = call.get("function") or {}
         name = fn.get("name")
         args = json.loads(fn.get("arguments") or "{}")
-        if name == _FINISH_NAME:
-            _debug("openai: finish")
-            return LLMProposal(intent="", script="",
-                               text=args.get("summary", "") or content,
-                               is_tool_call=False, reasoning=reasoning,
-                               kind="finish",
-                               verified=bool(args.get("verified")),
-                               evidence=tuple(args.get("evidence") or ()),
-                               reviewed_plan=bool(args.get("reviewed_plan")))
-        if name == _INSPECT_NAME:
-            return LLMProposal(
-                "", "", "", False, reasoning=reasoning, kind="inspect",
-                query=args.get("query", ""))
-        if name == _QUESTION_NAME:
-            return _question_proposal(args, reasoning)
-        if name == _API_NAME:
-            return LLMProposal(
-                "", "", "", False, reasoning=reasoning, kind="api_lookup",
-                api_query=str(args.get("query", "")),
-                api_module=str(args.get("module", "FreeCAD")),
-                api_symbol=str(args.get("symbol", "")))
-        if name == _TOOL_NAME:
-            _debug("openai: run_freecad_script")
-            return LLMProposal(intent=args.get("intent", ""),
-                               script=args.get("script", ""),
-                               text=content,
-                               is_tool_call=True, reasoning=reasoning,
-                               kind="script",
-                               strategy=args.get("strategy", ""),
-                               stage=args.get("stage", ""),
-                               plan=tuple(args.get("plan") or ()),
-                               plan_step=int(args.get("plan_step") or 0),
-                               success_criteria=tuple(
-                                   args.get("success_criteria") or ()))
+        proposal = _proposal_from_tool(name, args, reasoning, content)
+        if proposal is not None:
+            _debug("openai: " + name)
+            return proposal
     # No recognized tool call (a model that ignored tool_choice): treat any text
     # as a finish so the turn still resolves rather than looping.
     _debug("openai: no tool call; text=%r" % (content[:120]))
@@ -650,13 +658,13 @@ def _complete_anthropic(wire_model: str, messages: list,
             blocks = []
             for block in content:
                 if block.get("type") == "image_url":
-                    url = (block.get("image_url") or {}).get("url", "")
+                    data_url = (block.get("image_url") or {}).get("url", "")
                     prefix = "data:image/png;base64,"
-                    if url.startswith(prefix):
+                    if data_url.startswith(prefix):
                         blocks.append({
                             "type": "image",
                             "source": {"type": "base64", "media_type": "image/png",
-                                       "data": url[len(prefix):]},
+                                       "data": data_url[len(prefix):]},
                         })
                 else:
                     blocks.append(block)
@@ -686,65 +694,25 @@ def _complete_anthropic(wire_model: str, messages: list,
         raise LLMError(f"Unexpected response shape: {resp!r}")
     text_parts = []
     thinking_parts = []
-    script_block = None
-    finish_block = None
-    inspect_block = None
-    question_block = None
-    api_block = None
+    tool_blocks = {}
     for block in content:
         btype = block.get("type")
-        if btype == "tool_use" and block.get("name") == _TOOL_NAME:
-            script_block = block
-        elif btype == "tool_use" and block.get("name") == _FINISH_NAME:
-            finish_block = block
-        elif btype == "tool_use" and block.get("name") == _INSPECT_NAME:
-            inspect_block = block
-        elif btype == "tool_use" and block.get("name") == _QUESTION_NAME:
-            question_block = block
-        elif btype == "tool_use" and block.get("name") == _API_NAME:
-            api_block = block
+        if btype == "tool_use":
+            tool_blocks[block.get("name")] = block
         elif btype == "text":
             text_parts.append(block.get("text", ""))
         elif btype == "thinking":
             thinking_parts.append(block.get("thinking", "") or "")
     reasoning = "\n".join(t for t in thinking_parts if t)
-    if script_block is not None:
-        args = script_block.get("input") or {}
-        return LLMProposal(intent=args.get("intent", ""),
-                           script=args.get("script", ""),
-                           text="".join(text_parts),
-                           is_tool_call=True, reasoning=reasoning, kind="script",
-                           strategy=args.get("strategy", ""),
-                           stage=args.get("stage", ""),
-                           plan=tuple(args.get("plan") or ()),
-                           plan_step=int(args.get("plan_step") or 0),
-                           success_criteria=tuple(
-                               args.get("success_criteria") or ()))
-    if finish_block is not None:
-        args = finish_block.get("input") or {}
-        return LLMProposal(intent="", script="",
-                           text=args.get("summary", "") or "".join(text_parts),
-                           is_tool_call=False, reasoning=reasoning, kind="finish",
-                           verified=bool(args.get("verified")),
-                           evidence=tuple(args.get("evidence") or ()),
-                           reviewed_plan=bool(args.get("reviewed_plan")))
-    if inspect_block is not None:
-        args = inspect_block.get("input") or {}
-        return LLMProposal("", "", "", False, reasoning=reasoning,
-                           kind="inspect", query=args.get("query", ""))
-    if question_block is not None:
-        return _question_proposal(
-            question_block.get("input") or {}, reasoning)
-    if api_block is not None:
-        args = api_block.get("input") or {}
-        return LLMProposal(
-            "", "", "", False, reasoning=reasoning, kind="api_lookup",
-            api_query=str(args.get("query", "")),
-            api_module=str(args.get("module", "FreeCAD")),
-            api_symbol=str(args.get("symbol", "")))
+    text = "".join(text_parts)
+    # Prefer a work/finish tool over the read-only tools if several appear.
+    for name in (_TOOL_NAME, _FINISH_NAME, _INSPECT_NAME, _QUESTION_NAME,
+                 _API_NAME):
+        if name in tool_blocks:
+            return _proposal_from_tool(
+                name, tool_blocks[name].get("input"), reasoning, text)
     # Thinking-on path may return plain text; treat it as a finish.
-    return LLMProposal(intent="", script="",
-                       text="".join(text_parts),
+    return LLMProposal(intent="", script="", text=text,
                        is_tool_call=False, reasoning=reasoning, kind="finish")
 
 

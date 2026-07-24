@@ -33,6 +33,39 @@ def _openai_response(tool_args=None, content=None):
     return {"choices": [{"message": message}]}
 
 
+# ---- Shared proposal factory (used by both adapters) ----
+
+def test_proposal_from_tool_covers_every_kind():
+    script = lc._proposal_from_tool(
+        lc._TOOL_NAME, {"intent": "i", "script": "s"}, "why", "t")
+    assert script.is_tool_call and script.kind == "script"
+    assert script.reasoning == "why"
+
+    finish = lc._proposal_from_tool(lc._FINISH_NAME, {"summary": "done"})
+    assert not finish.is_tool_call and finish.kind == "finish"
+    assert finish.text == "done"
+
+    inspect = lc._proposal_from_tool(lc._INSPECT_NAME, {"query": "q"})
+    assert inspect.kind == "inspect" and inspect.query == "q"
+
+    api = lc._proposal_from_tool(lc._API_NAME, {"symbol": "Box"})
+    assert api.kind == "api_lookup" and api.api_symbol == "Box"
+
+    question = lc._proposal_from_tool(lc._QUESTION_NAME, {
+        "question": "which?",
+        "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]})
+    assert question.kind == "question" and len(question.options) == 2
+
+
+def test_proposal_from_tool_returns_none_for_unknown_name():
+    assert lc._proposal_from_tool("nonexistent_tool", {}) is None
+
+
+def test_finish_falls_back_to_text_when_no_summary():
+    finish = lc._proposal_from_tool(lc._FINISH_NAME, {}, text="loose text")
+    assert finish.text == "loose text"
+
+
 def test_openai_parses_tool_call(monkeypatch):
     captured = {}
     _patch_http(monkeypatch,
@@ -284,6 +317,27 @@ def test_anthropic_parses_tool_use(monkeypatch):
     assert captured["payload"]["tools"] == lc.ANTHROPIC_TOOL_SCHEMA
     # system is hoisted out of messages, not injected as a message
     assert all(m["role"] != "system" for m in captured["payload"]["messages"])
+
+
+def test_anthropic_image_in_history_does_not_clobber_request_url(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "text", "text": "I see it."},
+    ]), captured)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "what is this?"},
+            {"type": "image_url",
+             "image_url": {"url": "data:image/png;base64,YWJj"}},
+        ],
+    }]
+    lc.complete(messages, _settings(model="anthropic/claude-opus-4-8"))
+    # The image data URI must not overwrite the request endpoint.
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    block = captured["payload"]["messages"][0]["content"][1]
+    assert block == {"type": "image", "source": {
+        "type": "base64", "media_type": "image/png", "data": "YWJj"}}
 
 
 def test_anthropic_parses_multiple_choice_question(monkeypatch):
