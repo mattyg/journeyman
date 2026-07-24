@@ -1271,3 +1271,49 @@ def test_ledger_first_never_blocks_a_diagnostic():
             lambda _r, _s, _i, _p: None,
             on_tool_result=lambda tool, summary, content: shown.append(content))
     assert not [t for t in shown if t.startswith("[")]
+
+
+def test_multi_feature_step_is_split_before_execution():
+    """Per-feature verification is only real if a step builds one feature."""
+    batched = (
+        "pad = body.newObject('PartDesign::Pad','PlatePad')\n"
+        "pk = body.newObject('PartDesign::Pocket','BoltHole')\n")
+    single = "pad = body.newObject('PartDesign::Pad','PlatePad')\n"
+    client = FakeClient([
+        LLMProposal("pad and pocket", batched, "", True),
+        LLMProposal("pad only", single, "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    shown = []
+    agent = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, one_feature_per_step=True))
+    out = agent.send(
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    asks = [t for t in shown if t.startswith("[one feature per step]")]
+    assert len(asks) == 1
+    assert "2 features" in asks[0]
+    assert asks[0] in [
+        m["content"] for m in agent.messages if m["role"] == "user"]
+    assert not executor.results, "only the single-feature step ran"
+
+
+def test_one_feature_gate_is_off_by_default():
+    batched = (
+        "pad = body.newObject('PartDesign::Pad','P')\n"
+        "pk = body.newObject('PartDesign::Pocket','H')\n")
+    client = FakeClient([
+        LLMProposal("pad and pocket", batched, "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    out = _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True)).send(
+            "model it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    assert not [t for t in shown if t.startswith("[one feature per step]")]

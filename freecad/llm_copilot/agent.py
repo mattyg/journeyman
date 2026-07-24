@@ -69,6 +69,7 @@ class _Turn:
         # The ledger-first turn is injected at most once per turn, so a model
         # that declines to supply a ledger meets the normal gate, not a loop.
         self.ledger_first_requested = False
+        self.multi_feature_retries = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -642,6 +643,24 @@ class Agent:
                 turn.ledger["observed_features"] = features
                 turn.fidelity_clarification = False
                 turn.fidelity_retries = 0
+
+            if self.settings.one_feature_per_step and not diagnostic:
+                issues = cad_workflow.multi_feature_issues(proposal.script)
+                if issues:
+                    turn.multi_feature_retries += 1
+                    if turn.multi_feature_retries > max(
+                            1, self.settings.self_correction_attempts):
+                        summary = (
+                            "I couldn't reduce this to one feature per step: "
+                            + "; ".join(issues) + ".")
+                        self.messages.append(
+                            {"role": "assistant", "content": summary})
+                        return summary
+                    self._reject(
+                        turn_protocol.one_feature_required(issues),
+                        proposal, on_tool_result)
+                    continue
+                turn.multi_feature_retries = 0
 
             # record the assistant's tool intent and design stage in history
             workflow_line = ""

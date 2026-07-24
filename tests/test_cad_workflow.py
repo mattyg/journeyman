@@ -192,3 +192,29 @@ def test_inert_script_is_not_diagnosis():
     """A no-op must not slip past the planning gates by changing nothing."""
     assert cad_workflow.is_read_only_script("pass") is False
     assert cad_workflow.is_read_only_script("x = 1") is False
+
+
+# --- one feature per step ---
+
+def test_multiple_features_in_one_script_are_rejected():
+    """Turn 2 of the climbing-hanger transcript: pad plus two pockets."""
+    issues = cad_workflow.multi_feature_issues(
+        "pad = body.newObject('PartDesign::Pad','PlatePad')\n"
+        "pk = body.newObject('PartDesign::Pocket','BoltHole')\n"
+        "pk2 = body.newObject('PartDesign::Pocket','TeardropPocket')\n")
+    assert len(issues) == 1
+    assert "3 features" in issues[0]
+    assert "PartDesign::Pad" in issues[0]
+
+
+def test_one_feature_with_its_scaffolding_is_allowed():
+    """A Body, sketch and datums supporting a single feature are one step."""
+    assert cad_workflow.multi_feature_issues(
+        "body = doc.addObject('PartDesign::Body','B')\n"
+        "sk = body.newObject('Sketcher::SketchObject','S')\n"
+        "pad = body.newObject('PartDesign::Pad','P')\n") == []
+
+
+def test_scripts_building_no_features_are_allowed():
+    assert cad_workflow.multi_feature_issues("print(doc.Objects)") == []
+    assert cad_workflow.multi_feature_issues("def (:") == []

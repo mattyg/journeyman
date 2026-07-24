@@ -319,3 +319,46 @@ def is_read_only_script(script):
             if name in ("print", "PrintMessage", "PrintWarning"):
                 reports = True
     return reports
+
+
+def _created_feature_types(script):
+    """Part Design feature type ids constructed by newObject/addObject calls."""
+    import ast
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return []
+    created = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if getattr(node.func, "attr", None) not in ("newObject", "addObject"):
+            continue
+        if not node.args:
+            continue
+        first = node.args[0]
+        if not isinstance(first, ast.Constant) or not isinstance(
+                first.value, str):
+            continue
+        type_id = first.value
+        # Sketches, datums and the Body itself are scaffolding for a feature,
+        # not features in their own right; a step may carry them.
+        if (type_id.startswith("PartDesign::")
+                and type_id != "PartDesign::Body"):
+            created.append(type_id)
+    return created
+
+
+def multi_feature_issues(script):
+    """Reject a script that builds more than one Part Design feature.
+
+    Per-feature verification is the harness's second principle: a step that
+    pads, pockets and pockets again cannot say which operation broke when the
+    body comes back invalid, and every result after the first failure is noise.
+    """
+    created = _created_feature_types(script)
+    if len(created) <= 1:
+        return []
+    return [
+        "this step builds {} features ({}); build one and verify it before "
+        "the next".format(len(created), ", ".join(created))]

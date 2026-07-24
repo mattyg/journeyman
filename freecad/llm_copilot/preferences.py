@@ -198,6 +198,7 @@ class LLMCopilotPreferencesPage:
         workflow_flags = [
             ("planningCheck", "Require a structured design plan before editing"),
             ("assumptionCheck", "Require a numeric assumption ledger"),
+            ("oneFeatureCheck", "Build one feature per step"),
             ("parametricCheck", "Prefer editable parametric features"),
             ("sketchCheck", "Check sketch constraints and attachment"),
             ("stageCheck", "Guide sketch, additive, subtractive, finish order"),
@@ -335,6 +336,7 @@ class LLMCopilotPreferencesPage:
         return [
             (self.planningCheck, "StructuredCADPlanning", True),
             (self.assumptionCheck, "AssumptionLedger", False),
+            (self.oneFeatureCheck, "OneFeaturePerStep", False),
             (self.parametricCheck, "ParametricFeaturePreference", True),
             (self.sketchCheck, "SketchConstraintVerification", True),
             (self.stageCheck, "StageOrderGuidance", True),

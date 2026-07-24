@@ -124,6 +124,15 @@ def fidelity_required(issues):
         "omission approval.")
 
 
+def one_feature_required(issues):
+    """The script builds several features, defeating per-feature verification."""
+    return _gate(
+        "one feature per step", issues,
+        "Submit only the next feature, with the sketch and datums it needs. "
+        "Verify it built correctly before proposing the following one. The "
+        "document has not been edited.")
+
+
 def ledger_first():
     """Ask for assumptions and a feature-tree plan before any geometry.
 
