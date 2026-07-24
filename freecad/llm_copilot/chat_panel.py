@@ -6,9 +6,7 @@ import FreeCADGui as Gui
 
 from . import document_inspector, script_executor, llm_client
 from .agent import Agent
-from .settings import load_settings
-
-PARAM_PATH = "User parameter:BaseApp/Preferences/LLMCopilot"
+from .settings import load_settings, PARAM_PATH
 
 class _Client:
     def complete(self, messages, settings):
@@ -87,11 +85,26 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
 _dock = None
 
-def toggle_panel():
+def _ensure_dock():
+    """Create the dock widget once and attach it to the main window.
+
+    Attaching it makes it appear (and be toggleable) under View -> Panels in
+    every workbench, so the copilot is ambient rather than tied to a mode.
+    """
     global _dock
-    mw = Gui.getMainWindow()
     if _dock is None:
+        mw = Gui.getMainWindow()
         _dock = CopilotDockWidget(mw)
         mw.addDockWidget(QtCore.Qt.RightDockWidgetArea, _dock)
-    else:
-        _dock.setVisible(not _dock.isVisible())
+    return _dock
+
+def create_panel(visible=False):
+    """Install the dock at startup. Hidden by default so it doesn't intrude;
+    the user reveals it via View -> Panels or the toggle shortcut."""
+    dock = _ensure_dock()
+    dock.setVisible(visible)
+    return dock
+
+def toggle_panel():
+    dock = _ensure_dock()
+    dock.setVisible(not dock.isVisible())

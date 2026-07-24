@@ -33,21 +33,16 @@ e.g. `http://localhost:11434/v1`, and leave `ApiKey` empty.
 
 ## Installation
 
-Install the workbench through the **FreeCAD Addon Manager** as usual. That's
+Install the addon through the **FreeCAD Addon Manager** as usual. That's
 the whole install — because the LLM client is standard-library-only, there is
 no separate dependency step, no `pip install`, and no compiled wheels. It works
 on any FreeCAD build, including immutable/Nix installs.
 
 ## Configuration
 
-Settings live under the parameter path:
-
-```
-User parameter:BaseApp/Preferences/LLMCopilot
-```
-
-Open them via **Tools -> Edit parameters** in FreeCAD and navigate to that
-group. Available settings and their defaults:
+Open **Edit -> Preferences -> LLM Copilot**. Settings are stored under the
+parameter group `BaseApp/Preferences/Mod/LLMCopilot` (the standard FreeCAD
+addon location). Available settings and their defaults:
 
 | Setting                | Default | Meaning                                                              |
 |-------------------------|---------|------------------------------------------------------------------------|
@@ -62,15 +57,15 @@ group. Available settings and their defaults:
 ## Manual smoke test
 
 1. Symlink this repository into FreeCAD's `Mod` directory (e.g.
-   `~/.local/share/FreeCAD/Mod/freecad-llm-plugin`).
-2. Launch FreeCAD.
-3. Switch to the **LLM Copilot** workbench from the workbench selector.
-4. In the chat panel, set your model and API key (see Configuration above).
-5. Click the toolbar button to open/focus the chat panel.
-6. Type: `make a 10mm cube`.
-7. Confirm the proposed intent.
-8. Verify a cube appears in the 3D view.
-9. Click **Undo last change** and verify the cube is removed.
+   `~/.local/share/FreeCAD/Mod/LLMCopilot`).
+2. Launch FreeCAD (the copilot is not a workbench — it loads on startup and is
+   available in every workbench).
+3. Set your model and API key via **Edit -> Preferences -> LLM Copilot**.
+4. Show the panel via **View -> Panels -> LLM Copilot** (it starts hidden).
+5. Type: `make a 10mm cube`.
+6. Confirm the proposed intent.
+7. Verify a cube appears in the 3D view.
+8. Click **Undo last change** and verify the cube is removed.
 
 ## Running the tests
 

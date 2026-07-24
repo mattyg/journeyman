@@ -9,10 +9,9 @@
   <url type="repository" branch="main">https://github.com/matt/freecad-llm-plugin</url>
   <url type="readme">https://github.com/matt/freecad-llm-plugin/blob/main/README.md</url>
   <content>
-    <workbench>
-      <classname>LLMCopilotWorkbench</classname>
-      <subdirectory>./freecad/llm_copilot/</subdirectory>
-    </workbench>
+    <!-- Not a workbench: an ambient dock widget + preferences page, registered
+         from freecad/llm_copilot/init_gui.py at GUI startup. -->
+    <other/>
   </content>
   <!-- No Python dependencies: the LLM client uses only the standard library
        (urllib + json), so nothing needs to be pip-installed or vendored. -->

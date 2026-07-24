@@ -1,5 +1,12 @@
 from dataclasses import dataclass
 
+# FreeCAD parameter group for this addon's settings. Follows the FreeCAD
+# convention (BaseApp/Preferences/Mod/<Name>) so that a Gui::Pref* preferences
+# page and the code read/write the same store. The trailing group name here
+# ("Mod/LLMCopilot") must match the prefPath/prefEntry bindings in the
+# preferences .ui file.
+PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/LLMCopilot"
+
 @dataclass
 class Settings:
     model: str
