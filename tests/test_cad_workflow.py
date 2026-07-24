@@ -343,3 +343,58 @@ def test_value_change_without_evidence_still_blocks():
 def test_unchanged_rows_produce_no_relabel_notes():
     rows = (_assumption(id="A5"),)
     assert cad_workflow.relabelled_assumptions(rows, rows) == []
+
+
+# --- degradation across successful steps ---
+
+def _state(solids=1, volume=8364.6, valid=True, bbox=None, holes=None):
+    shape = {"solids": solids, "volume": volume, "valid": valid}
+    if holes:
+        shape["cylinder_diameters"] = holes
+    item = {"type": "PartDesign::Body", "shape": shape}
+    if bbox:
+        item["bbox"] = bbox
+    return {"objects": {"HangerBody": item}}
+
+
+def test_losing_a_solid_is_reported_even_though_the_step_succeeded():
+    """transcript-4 destroyed a finished hanger over six successful steps."""
+    issues = cad_workflow.regression_issues(_state(), _state(solids=0, volume=0))
+    assert any("solid count dropped from 1 to 0" in issue for issue in issues)
+
+
+def test_newly_invalid_objects_are_named():
+    after = _state(valid=False)
+    issues = cad_workflow.regression_issues(_state(), after)
+    assert any("now invalid: HangerBody" in issue for issue in issues)
+
+
+def test_losing_most_of_the_volume_is_reported():
+    issues = cad_workflow.regression_issues(_state(), _state(volume=100.0))
+    assert any("material disappeared" in issue for issue in issues)
+
+
+def test_an_improving_step_reports_nothing():
+    assert cad_workflow.regression_issues(_state(), _state(volume=9000.0)) == []
+    assert cad_workflow.regression_issues(None, _state()) == []
+
+
+def test_a_pocket_removing_some_material_is_not_a_regression():
+    """Cutting a hole legitimately reduces volume; only a collapse matters."""
+    assert cad_workflow.regression_issues(_state(), _state(volume=8000.0)) == []
+
+
+# --- "you already have a solid" summary ---
+
+def test_buildable_summary_states_size_and_holes():
+    text = cad_workflow.buildable_summary(
+        _state(bbox=[35.0, 72.4, 4.0], holes=[3.0, 12.0, 30.0]))
+    assert "35.0 x 72.4 x 4.0 mm" in text
+    assert "cylinder diameters 3, 12, 30" in text
+    assert "if it already meets them, finish" in text
+
+
+def test_no_summary_without_a_valid_solid():
+    assert cad_workflow.buildable_summary(_state(solids=0)) == ""
+    assert cad_workflow.buildable_summary(_state(valid=False)) == ""
+    assert cad_workflow.buildable_summary({"objects": {}}) == ""

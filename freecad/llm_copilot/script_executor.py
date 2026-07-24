@@ -131,6 +131,14 @@ def assert_feature(obj, solids=None):
     return obj
 
 
+_SOLVER_STATUS = {
+    -1: "failed to converge",
+    -2: "are redundant or conflicting",
+    -3: "over-constrain the sketch",
+    -4: "over-constrain the sketch",
+}
+
+
 def assert_sketch_constrained(sketch):
     """Raise unless ``sketch`` is closed and fully constrained."""
     name = getattr(sketch, "Name", None) or repr(sketch)
@@ -149,11 +157,19 @@ def assert_sketch_constrained(sketch):
     if shape.Wires and not all(wire.isClosed() for wire in shape.Wires):
         raise ValueError(
             f"{name} is not a closed wire; a pad or pocket profile must close")
-    dof = sketch.solve() if hasattr(sketch, "solve") else 0
-    remaining = getattr(sketch, "FullyConstrained", None)
-    if remaining is False:
+    status = sketch.solve() if hasattr(sketch, "solve") else 0
+    # solve() returns a solver STATUS, not a count of free parameters: 0 means
+    # "solved", and negatives are failures. A conflicting sketch is fixed by
+    # REMOVING a constraint, so it must not be reported as "add more".
+    if status and status < 0:
         raise ValueError(
-            f"{name} is not fully constrained (solver status {dof})")
+            f"{name} could not be solved (status {status}): its constraints "
+            f"{_SOLVER_STATUS.get(status, 'conflict with each other')}. "
+            "Remove or relax a constraint — adding more will not fix this.")
+    if getattr(sketch, "FullyConstrained", None) is False:
+        raise ValueError(
+            f"{name} is not fully constrained: some geometry can still move. "
+            "Add the missing dimensions or relations, then re-check.")
     return sketch
 
 
@@ -210,8 +226,18 @@ def run(app, script: str, validate=False, rollback_on_failure=False,
                     app, names=changed_names)
                 if not validation_ok and rollback_on_failure:
                     doc.abortTransaction()
+                    # Name what broke in the error itself. A bare
+                    # POST_EXECUTION_VALIDATION_FAILED tells the model nothing
+                    # it can act on, and the detail used to live only in a
+                    # separate field the failure feedback renders further down.
                     return result(
-                        False, "POST_EXECUTION_VALIDATION_FAILED",
+                        False,
+                        "POST_EXECUTION_VALIDATION_FAILED — the step was "
+                        "rolled back because it left the document invalid:\n"
+                        + validation
+                        + "\nFix the object named above. If a sketch is "
+                        "over-constrained, remove a constraint rather than "
+                        "adding one.",
                         False, validation, True)
         doc.commitTransaction()
         return result(True, validation_ok=validation_ok, validation=validation)

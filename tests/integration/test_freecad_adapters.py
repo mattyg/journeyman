@@ -56,6 +56,46 @@ class InspectorTests(unittest.TestCase):
         self.assertTrue(after["objects"]["Box"]["shape"]["valid"])
         self.assertIn("Created: Box", di.structured_diff(before, after))
 
+    def test_cylinder_diameters_are_measured_from_the_solid(self):
+        """A run measured its own model, saw no 12 mm cylinder where the bolt
+        hole should be, and talked itself out of the discrepancy. The number
+        must come from the solid, not from a sketch bounding box."""
+        doc = App.newDocument("Holes")
+        box = doc.addObject("Part::Box", "Plate")
+        box.Length, box.Width, box.Height = 40, 40, 4
+        cyl = doc.addObject("Part::Cylinder", "Bolt")
+        cyl.Radius, cyl.Height = 6.0, 10.0
+        cyl.Placement.Base = App.Vector(20, 20, -2)
+        cut = doc.addObject("Part::Cut", "Drilled")
+        cut.Base, cut.Tool = box, cyl
+        doc.recompute()
+        state = di.document_state(App, rich=True)
+        holes = state["objects"]["Drilled"]["shape"]["cylinder_diameters"]
+        self.assertIn(12.0, holes)
+        # And it reaches the model through the validation summary.
+        ok, report = di.validate(App, names=["Drilled"])
+        self.assertTrue(ok, report)
+        self.assertIn("cylinder_diameters", report)
+        self.assertIn("12.0", report)
+
+    def test_shapes_without_cylinders_omit_the_key(self):
+        doc = App.newDocument("NoHoles")
+        box = doc.addObject("Part::Box", "Plain")
+        doc.recompute()
+        shape = di.document_state(App, rich=True)["objects"]["Plain"]["shape"]
+        self.assertNotIn("cylinder_diameters", shape)
+
+    def test_validation_failure_error_names_the_broken_object(self):
+        doc = App.newDocument("Bad")
+        feature = doc.addObject("PartDesign::Feature", "Broken")
+        doc.recompute()
+        result = se.run(
+            App, "pass", validate=True, rollback_on_failure=True)
+        if not result.ok:
+            self.assertIn("rolled back", result.error)
+            self.assertNotEqual(
+                result.error.strip(), "POST_EXECUTION_VALIDATION_FAILED")
+
     def test_validation_reports_valid_solid(self):
         doc = App.newDocument("T")
         doc.addObject("Part::Box", "Box")

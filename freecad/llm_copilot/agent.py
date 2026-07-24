@@ -75,6 +75,11 @@ class _Turn:
         # is a deadlock, not correction — see Agent._reject.
         self.last_rejection = None
         self.repeated_rejections = 0
+        # Healthiest document state reached this turn. Every other guard
+        # watches for failure; a run can also be destroyed by a sequence of
+        # *successful* steps that each make the model worse.
+        self.best_state = None
+        self.best_solids = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -813,6 +818,16 @@ class Agent:
                     result, before, after, changed_names, self.settings)
                 workflow_warnings = turn_protocol.review_step(
                     before, after, proposal, self.settings)
+                # A step that succeeded can still have made the model worse.
+                workflow_warnings.extend(
+                    cad_workflow.regression_issues(turn.best_state, after))
+                solids, _volume, invalid = cad_workflow._solid_health(after)
+                if not invalid and solids >= turn.best_solids:
+                    turn.best_state, turn.best_solids = after, solids
+                # Say plainly when a valid solid exists, so verification does
+                # not drift into open-ended tinkering on a finished part.
+                built = cad_workflow.buildable_summary(after)
+                ledger["built"] = built
                 if proposal.stage:
                     ledger["completed_stages"].add(proposal.stage)
                 if proposal.plan_step:

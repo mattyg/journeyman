@@ -267,3 +267,72 @@ def test_successful_script_still_commits_once():
     assert result.ok is True
     assert app.ActiveDocument.committed == 1
     assert app.ActiveDocument.aborted == 0
+
+
+# --- solver status vs. FullyConstrained ---
+
+def _sketch(name="SlotSketch", status=0, fully=True, geometry=2, closed=True):
+    sketch = FakeObj(name, FakeShape(wires=[FakeWire(closed)]))
+    sketch.Geometry = [object()] * geometry
+    sketch.FullyConstrained = fully
+    sketch.solve = lambda: status
+    return sketch
+
+
+def test_negative_solver_status_says_remove_a_constraint():
+    """transcript-4 added a Symmetric constraint to a sketch that was already
+    conflicting, driving it further over-constrained and destroying the model."""
+    with pytest.raises(ValueError) as excinfo:
+        assert_sketch_constrained(_sketch(status=-3, fully=False))
+    message = str(excinfo.value)
+    assert "over-constrain" in message
+    assert "Remove or relax a constraint" in message
+    assert "adding more will not fix" in message.lower()
+
+
+def test_redundant_constraints_are_named_as_such():
+    with pytest.raises(ValueError, match="redundant or conflicting"):
+        assert_sketch_constrained(_sketch(status=-2, fully=False))
+
+
+def test_solved_but_underconstrained_asks_for_more_constraints():
+    with pytest.raises(ValueError) as excinfo:
+        assert_sketch_constrained(_sketch(status=0, fully=False))
+    message = str(excinfo.value)
+    assert "not fully constrained" in message
+    assert "Add the missing" in message
+    assert "Remove" not in message
+
+
+def test_solved_and_fully_constrained_passes():
+    sketch = _sketch(status=0, fully=True)
+    assert assert_sketch_constrained(sketch) is sketch
+
+
+def test_solver_failure_outranks_the_fully_constrained_flag():
+    """A conflicting sketch can still report FullyConstrained True."""
+    with pytest.raises(ValueError, match="could not be solved"):
+        assert_sketch_constrained(_sketch(status=-4, fully=True))
+
+
+class ValidatingDoc(RecordingDoc):
+    """A document whose post-execution validation fails."""
+
+
+def test_validation_failure_names_what_broke():
+    """A bare POST_EXECUTION_VALIDATION_FAILED told the model nothing."""
+    import freecad.llm_copilot.document_inspector as di
+    app = RecordingApp()
+    original_state, original_validate = di.document_state, di.validate
+    di.document_state = lambda _app, rich=True: {"objects": {}}
+    di.validate = lambda _app, names=None: (False, "EdgeRounding.State: Invalid")
+    try:
+        result = script_executor.run(
+            app, "print('x')\n", validate=True, rollback_on_failure=True)
+    finally:
+        di.document_state, di.validate = original_state, original_validate
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "EdgeRounding.State: Invalid" in result.error
+    assert "rolled back" in result.error
+    assert "over-constrained" in result.error

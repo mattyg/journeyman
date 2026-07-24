@@ -292,6 +292,9 @@ def ledger_text(ledger):
         lines.extend(
             f"{'✓' if i < ledger.get('completed_steps', 0) else '○'} {step}"
             for i, step in enumerate(plan))
+    built = ledger.get("built")
+    if built:
+        lines.append(built)
     criteria = ledger.get("success_criteria", ())
     if criteria:
         lines.append("Success criteria:")
@@ -433,4 +436,80 @@ def noop_block_issues(script):
         issues.append(
             f"the {kind} block at line {node.lineno} does nothing; write the "
             "statements it should contain or remove it")
+    return issues
+
+
+def buildable_summary(state):
+    """A one-line statement of what the document currently holds, or ''.
+
+    Success criteria are prose and cannot be machine-checked, but "you have a
+    valid solid of this size" is a fact — and a run that already had a finished
+    part spent six further turns degrading it because nothing ever said so.
+    """
+    solids, volume, invalid = _solid_health(state)
+    if invalid or not solids:
+        return ""
+    biggest = None
+    for item in (state.get("objects") or {}).values():
+        shape = item.get("shape") or {}
+        if not shape.get("solids") or shape.get("valid") is False:
+            continue
+        bbox = item.get("bbox")
+        if bbox and (biggest is None or (shape.get("volume") or 0) > biggest[0]):
+            biggest = (shape.get("volume") or 0, bbox,
+                       shape.get("cylinder_diameters") or [])
+    if biggest is None:
+        return ""
+    _volume, bbox, holes = biggest
+    text = (
+        "The document holds a valid solid: "
+        + " x ".join(f"{value:.1f}" for value in bbox)
+        + f" mm, volume {volume:.1f} mm3")
+    if holes:
+        text += ", cylinder diameters " + ", ".join(
+            f"{d:g}" for d in holes)
+    return text + ". Compare it with your success criteria before changing it "\
+        "further; if it already meets them, finish."
+
+
+def _solid_health(state):
+    """Total solids, total volume, and validity across a document state."""
+    solids = volume = 0
+    invalid = []
+    for name, item in (state.get("objects") or {}).items():
+        shape = item.get("shape") or {}
+        if shape.get("inspection_error"):
+            continue
+        solids += int(shape.get("solids") or 0)
+        volume += float(shape.get("volume") or 0.0)
+        if shape.get("valid") is False:
+            invalid.append(name)
+    return solids, volume, invalid
+
+
+def regression_issues(best, after):
+    """Report a step that succeeded but left the model worse than before.
+
+    Every other guard watches for failure. A run can also be destroyed by a
+    sequence of *successful* steps that each degrade the model — chasing a
+    cosmetic flag until a working solid is gone. Compare against the healthiest
+    state reached this turn, not merely the previous step, so a slow slide is
+    caught rather than each small drop looking acceptable.
+    """
+    if not best:
+        return []
+    best_solids, best_volume, _ = _solid_health(best)
+    solids, volume, invalid = _solid_health(after)
+    issues = []
+    if best_solids and solids < best_solids:
+        issues.append(
+            f"solid count dropped from {best_solids} to {solids} since the "
+            "best state this turn")
+    elif best_volume and volume < best_volume * 0.5:
+        issues.append(
+            f"total volume fell from {best_volume:.1f} to {volume:.1f} — "
+            "more than half the material disappeared")
+    if invalid:
+        issues.append(
+            "these objects are now invalid: " + ", ".join(sorted(invalid)))
     return issues

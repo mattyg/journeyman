@@ -1635,3 +1635,56 @@ def test_rate_limit_without_a_handler_does_not_crash_the_turn():
         AlwaysLimited([]), FakeExecutor([]), _settings()).send(
             "make it", lambda _intent: True, lambda _r, _s, _i, _p: None)
     assert "rate limited or overloaded" in out
+
+
+def _body_state(solids=1, volume=8364.6, valid=True, bbox=None):
+    item = {"type": "PartDesign::Body",
+            "shape": {"solids": solids, "volume": volume, "valid": valid}}
+    if bbox:
+        item["bbox"] = bbox
+    # A Body plus a contained sketch, so the Part Design policy check passes
+    # and the step is judged on its geometry rather than its structure.
+    return {"objects": {
+        "HangerBody": item,
+        "OutlineSketch": {
+            "type": "Sketcher::SketchObject", "body": "HangerBody"},
+    }}
+
+
+def test_a_successful_step_that_destroys_the_model_is_reported():
+    """transcript-4: six successful steps turned a finished hanger into nothing."""
+    states = iter([
+        _body_state(), _body_state(),                 # step 1: builds the body
+        _body_state(), _body_state(solids=0, volume=0),  # step 2: destroys it
+        _body_state(solids=0, volume=0),
+    ])
+    inspector = lambda _app: "DOC"
+    inspector.state = lambda _app, _rich: next(states)
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True),
+        LLMProposal("tinker", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    agent = Agent(
+        client, inspector, FakeExecutor([ExecResult(True, "", "")] * 2),
+        object(), _settings(auto_approve_loop=True))
+    agent.send("make it", lambda _i: True, lambda *_a: None)
+    sent = str(client.calls[-1])
+    assert "solid count dropped from 1 to 0" in sent
+
+
+def test_the_model_is_told_when_it_already_has_a_valid_solid():
+    finished = _body_state(bbox=[35.0, 72.4, 4.0])
+    inspector = lambda _app: "DOC"
+    inspector.state = lambda _app, _rich: finished
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    agent = Agent(
+        client, inspector, FakeExecutor([ExecResult(True, "", "")]), object(),
+        _settings(auto_approve_loop=True, design_ledger_context=True))
+    agent.send("make it", lambda _i: True, lambda *_a: None)
+    sent = str(client.calls[-1])
+    assert "The document holds a valid solid" in sent
+    assert "if it already meets them, finish" in sent

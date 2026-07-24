@@ -43,6 +43,33 @@ def _safe_value(value):
     return str(value)
 
 
+def _cylinder_diameters(shape, limit=12):
+    """Distinct cylindrical-face diameters, smallest first.
+
+    Holes and bosses are cylinders, so this is the cheapest way to check that a
+    stated fastener size actually exists in the finished solid. A run once
+    measured its own model, saw no 12 mm cylinder where the bolt hole should
+    be, and talked itself out of the discrepancy — the number was available and
+    nothing consumed it.
+    """
+    diameters = set()
+    try:
+        faces = shape.Faces
+    except Exception:
+        return []
+    for face in faces:
+        surface = getattr(face, "Surface", None)
+        if getattr(surface, "TypeId", "") != "Part::GeomCylinder":
+            continue
+        try:
+            diameters.add(round(float(surface.Radius) * 2.0, 3))
+        except Exception:
+            continue
+        if len(diameters) >= limit:
+            break
+    return sorted(diameters)
+
+
 def document_state(app, rich=True):
     """Return stable structured state suitable for diffs and model inspection."""
     doc = getattr(app, "ActiveDocument", None)
@@ -74,6 +101,9 @@ def document_state(app, rich=True):
                     "volume": round(float(shape.Volume), 6),
                     "area": round(float(shape.Area), 6),
                 }
+                holes = _cylinder_diameters(shape)
+                if holes:
+                    item["shape"]["cylinder_diameters"] = holes
             except Exception as exc:
                 item["shape"] = {"inspection_error": str(exc) or type(exc).__name__}
         bb = getattr(shape, "BoundBox", None) if shape is not None else None
@@ -233,10 +263,13 @@ def validate(app, names=None):
             continue
         if "shape" in item and not item["shape"].get("inspection_error"):
             s = item["shape"]
-            summary.append(
+            line = (
                 f"{name}: valid={s.get('valid', 'unknown')}, "
                 f"solids={s.get('solids', 0)}, faces={s.get('faces', 0)}, "
                 f"volume={s.get('volume', 0)}, bbox={item.get('bbox')}")
+            if s.get("cylinder_diameters"):
+                line += f", cylinder_diameters={s['cylinder_diameters']}"
+            summary.append(line)
     if wanted is not None and not wanted:
         return True, "No document changes to validate."
     return True, "\n".join(summary) or "No invalid changed features detected."
