@@ -12,6 +12,7 @@ The provider prefix is stripped before the model name is sent on the wire.
 """
 
 import json
+import socket
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -70,6 +71,12 @@ _OPENAI_DEFAULT_BASE = "https://api.openai.com/v1"
 _OPENROUTER_DEFAULT_BASE = "https://openrouter.ai/api/v1"
 _ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
 
+# Network timeouts (seconds). Without these, urllib blocks forever on a slow or
+# unreachable endpoint — which would hang the model-list fetch and the chat
+# call. Listing models is a quick metadata call; completions can take longer.
+MODELS_TIMEOUT = 15
+COMPLETION_TIMEOUT = 120
+
 
 @dataclass
 class LLMProposal:
@@ -83,7 +90,8 @@ class LLMError(Exception):
     """Raised when the provider request fails or returns an unusable response."""
 
 
-def _http_post_json(url: str, headers: dict, payload: dict) -> dict:
+def _http_post_json(url: str, headers: dict, payload: dict,
+                    timeout: float = COMPLETION_TIMEOUT) -> dict:
     """POST a JSON body and parse a JSON response, using only the stdlib.
 
     Isolated so tests can monkeypatch a single seam instead of the network.
@@ -94,7 +102,7 @@ def _http_post_json(url: str, headers: dict, payload: dict) -> dict:
     for key, value in headers.items():
         req.add_header(key, value)
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -103,19 +111,25 @@ def _http_post_json(url: str, headers: dict, payload: dict) -> dict:
         except Exception:
             pass
         raise LLMError(f"HTTP {exc.code} from {url}: {detail}") from exc
+    except socket.timeout as exc:
+        raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
     except urllib.error.URLError as exc:
-        raise LLMError(f"Could not reach {url}: {exc.reason}") from exc
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, socket.timeout):
+            raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
+        raise LLMError(f"Could not reach {url}: {reason}") from exc
     return json.loads(body)
 
 
-def _http_get_json(url: str, headers: dict) -> dict:
+def _http_get_json(url: str, headers: dict,
+                   timeout: float = MODELS_TIMEOUT) -> dict:
     """GET a JSON response, using only the stdlib. Separate seam from POST so
     tests can stub model-listing independently of completions."""
     req = urllib.request.Request(url, method="GET")
     for key, value in headers.items():
         req.add_header(key, value)
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = ""
@@ -124,8 +138,13 @@ def _http_get_json(url: str, headers: dict) -> dict:
         except Exception:
             pass
         raise LLMError(f"HTTP {exc.code} from {url}: {detail}") from exc
+    except socket.timeout as exc:
+        raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
     except urllib.error.URLError as exc:
-        raise LLMError(f"Could not reach {url}: {exc.reason}") from exc
+        reason = getattr(exc, "reason", exc)
+        if isinstance(reason, socket.timeout):
+            raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
+        raise LLMError(f"Could not reach {url}: {reason}") from exc
     return json.loads(body)
 
 

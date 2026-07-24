@@ -171,6 +171,23 @@ def test_list_models_raises_on_error(monkeypatch):
         raise AssertionError("expected LLMError")
 
 
+def test_http_get_wraps_timeout_as_llmerror():
+    # 203.0.113.0/24 (TEST-NET-3) is reserved and unroutable, so the connect
+    # attempt hits our timeout. Verify _http_get_json turns that into an
+    # LLMError with a clear timeout message rather than hanging or leaking a
+    # raw socket error.
+    import time
+    start = time.monotonic()
+    try:
+        lc._http_get_json("http://203.0.113.1:81/models", {}, timeout=1)
+    except lc.LLMError as e:
+        assert "imed out" in str(e) or "reach" in str(e)
+    else:
+        raise AssertionError("expected LLMError")
+    # must not have blocked far beyond the 1s timeout
+    assert time.monotonic() - start < 10
+
+
 def test_http_error_becomes_llmerror(monkeypatch):
     def boom(url, headers, payload):
         raise lc.LLMError("HTTP 401 from x: bad key")

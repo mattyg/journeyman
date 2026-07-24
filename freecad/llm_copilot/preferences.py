@@ -35,11 +35,23 @@ from . import settings as st
 from . import llm_client
 
 
+class _FetchBridge(QtCore.QObject):
+    """Carries a worker thread's result back onto the GUI thread.
+
+    A queued signal is reliable inside FreeCAD's modal preferences dialog, where
+    QTimer.singleShot(0, ...) is not guaranteed to run in the nested event loop.
+    Payload: (provider, models_list, error_or_empty).
+    """
+    done = QtCore.Signal(str, object, str)
+
+
 class LLMCopilotPreferencesPage:
     def __init__(self, parent=None):
         self._param = FreeCAD.ParamGet(st.PARAM_PATH)
         self.form = QtGui.QWidget(parent)
         self.form.setWindowTitle("LLM Copilot")
+        self._bridge = _FetchBridge(self.form)
+        self._bridge.done.connect(self._on_fetch_done)
         self._build_ui()
         self.loadSettings()
 
@@ -177,34 +189,34 @@ class LLMCopilotPreferencesPage:
         self.statusLabel.setText("Fetching models…")
         self.refreshBtn.setEnabled(False)
         settings = st.load_settings(self._param)
-
-        def deliver(models, error):
-            # marshalled back onto the GUI thread via singleShot below
-            self.refreshBtn.setEnabled(True)
-            if provider != self._current_provider():
-                return
-            if error is not None:
-                self.statusLabel.setText("Couldn't fetch models (using saved list)")
-                FreeCAD.Console.PrintLog(
-                    "LLM Copilot model fetch failed: %s\n" % error)
-                return
-            if models:
-                st.set_cached_models(self._param, provider, models)
-                self._populate_models(provider, models)
-                self.statusLabel.setText("%d models" % len(models))
-            else:
-                self.statusLabel.setText("No models returned")
+        bridge = self._bridge
 
         def work():
             try:
                 models = llm_client.list_models(provider, settings)
-                err = None
-            except Exception as exc:  # LLMError or anything unexpected
+                err = ""
+            except Exception as exc:  # LLMError (incl. timeout) or unexpected
                 models, err = [], str(exc)
-            # Hop back to the GUI thread before touching widgets.
-            QtCore.QTimer.singleShot(0, lambda: deliver(models, err))
+            bridge.done.emit(provider, models, err)
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _on_fetch_done(self, provider, models, error):
+        """GUI-thread slot: apply a fetch result (or fall back on failure)."""
+        self.refreshBtn.setEnabled(True)
+        if provider != self._current_provider():
+            return
+        if error:
+            self.statusLabel.setText("Couldn't fetch models (using saved list)")
+            FreeCAD.Console.PrintLog(
+                "LLM Copilot model fetch failed: %s\n" % error)
+            return
+        if models:
+            st.set_cached_models(self._param, provider, list(models))
+            self._populate_models(provider, list(models))
+            self.statusLabel.setText("%d models" % len(models))
+        else:
+            self.statusLabel.setText("No models returned")
 
     # ---- signal handlers (GUI thread) ----
 

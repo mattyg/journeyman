@@ -18,10 +18,26 @@ PROVIDER_LABELS = {
 # Ollama is local and keyless; it needs a host URL instead of an API key.
 OLLAMA_DEFAULT_BASE = "http://localhost:11434/v1"
 
-# Curated fallback model shortlists, shown when no live list has been fetched
-# (no key yet, offline, or fetch failed). The live fetch replaces these.
+# Curated fallback model lists, shown before/instead of a live fetch (no key
+# yet, offline, or fetch failed). The live fetch (list_models) replaces these
+# whenever it succeeds, so these only need to cover the common case.
+#
+# Anthropic: the full current catalog of active, generally-available models
+# (from the Anthropic model documentation). OpenAI/OpenRouter change frequently
+# and expose hundreds via their /models endpoints, so a hardcoded list there is
+# only a small starting point — the live fetch is the real source. Ollama has no
+# universal list; models are whatever the user has pulled locally (via /api/tags).
 CURATED_MODELS = {
-    "anthropic": ["claude-opus-4-8", "claude-sonnet-5", "claude-haiku-4-5"],
+    "anthropic": [
+        "claude-opus-4-8",
+        "claude-opus-4-7",
+        "claude-opus-4-6",
+        "claude-opus-4-5",
+        "claude-sonnet-5",
+        "claude-sonnet-4-6",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+    ],
     "openai": ["gpt-5.4", "gpt-5-mini"],
     "openrouter": ["anthropic/claude-opus-4-8", "openai/gpt-5.4"],
     "ollama": ["llama3", "qwen2.5-coder"],
