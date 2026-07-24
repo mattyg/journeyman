@@ -1,8 +1,11 @@
 {
   description = "FreeCAD LLM Copilot — development environment";
 
+  # Pin to the stable release channel. Its FreeCAD/VTK are in the binary cache, so
+  # the dev shell substitutes prebuilt binaries instead of compiling from source
+  # (source builds fail: VTK does not compile under gcc 15 on nixos-unstable).
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
