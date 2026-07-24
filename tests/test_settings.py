@@ -70,6 +70,32 @@ def test_cached_models_roundtrip_and_fallback():
     assert get_cached_models(p, "anthropic") == ["claude-x", "claude-y"]
 
 
+def test_sort_models_newest_and_flagship_first():
+    from freecad.llm_copilot.settings import sort_models
+    # family tier (opus>sonnet>haiku) then natural version, descending
+    out = sort_models(
+        ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-4-7",
+         "claude-opus-4-8"], "anthropic")
+    assert out == ["claude-opus-4-8", "claude-opus-4-7",
+                   "claude-sonnet-5", "claude-haiku-4-5"]
+
+
+def test_sort_models_numeric_aware_and_dedup():
+    from freecad.llm_copilot.settings import sort_models
+    out = sort_models(
+        ["claude-opus-4-8", "claude-opus-4-10", "claude-opus-4-8",
+         "claude-opus-4-9"], "anthropic")
+    # 4-10 sorts above 4-8 (numbers, not strings); duplicate removed
+    assert out == ["claude-opus-4-10", "claude-opus-4-9", "claude-opus-4-8"]
+
+
+def test_sort_models_unknown_provider_natural_descending():
+    from freecad.llm_copilot.settings import sort_models
+    out = sort_models(["gpt-4o", "gpt-5.4", "gpt-5-mini"], "openai")
+    assert out[0] == "gpt-5.4"
+    assert out[-1] == "gpt-4o"
+
+
 def test_autonomy_settings_roundtrip():
     p = FakeParam()
     save_settings(p, Settings(

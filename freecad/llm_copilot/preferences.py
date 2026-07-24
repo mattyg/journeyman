@@ -174,6 +174,9 @@ class LLMCopilotPreferencesPage:
 
     def _populate_models(self, provider, models):
         current = st.get_model_for_provider(self._param, provider)
+        # Newest/flagship-first: family tier then natural version order (so
+        # claude-opus-4-8 is above -4-7, and -4-10 above -4-8).
+        models = st.sort_models(models, provider)
         self.modelCombo.blockSignals(True)
         self.modelCombo.clear()
         self.modelCombo.addItems(models)

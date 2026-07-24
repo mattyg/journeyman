@@ -62,6 +62,70 @@ class Settings:
     self_correction_attempts: int
 
 
+# Family tiers we prefer to surface first, per provider, when the model id
+# contains one of these tokens. Earlier = higher in the list. Anything without a
+# known tier sorts after these, by natural version order.
+_FAMILY_ORDER = {
+    "anthropic": ["opus", "sonnet", "haiku"],
+    # openrouter ids are "<vendor>/<model>"; still catch anthropic tiers within.
+    "openrouter": ["opus", "sonnet", "haiku"],
+}
+
+
+def _natural_key(text: str):
+    """Split a string into text/number chunks so numeric parts compare as
+    numbers (so "4-10" > "4-8"). Text chunks compare case-insensitively."""
+    import re
+    parts = re.split(r"(\d+)", text)
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append((1, int(p)))       # numbers after text within a chunk run
+        elif p:
+            key.append((0, p.lower()))
+    return key
+
+
+def _family_rank(model: str, provider: str) -> int:
+    order = _FAMILY_ORDER.get(provider, [])
+    low = model.lower()
+    for i, fam in enumerate(order):
+        if fam in low:
+            return i
+    return len(order)  # unknown families sort after the known tiers
+
+
+def sort_models(models, provider: str) -> list:
+    """Order models newest/flagship-first for the dropdown.
+
+    Primary key: family tier (opus before sonnet before haiku, where known).
+    Secondary key: natural version order, descending, so claude-opus-4-8 is above
+    -4-7 and -4-10 is above -4-8. De-duplicates while preserving this order.
+    """
+    unique = list(dict.fromkeys(models))  # dedupe, keep first occurrence
+    return sorted(
+        unique,
+        key=lambda m: (_family_rank(m, provider), _NaturalDesc(_natural_key(m))),
+    )
+
+
+class _NaturalDesc:
+    """Wraps a natural-sort key so a plain ascending sort orders it descending
+    (newest first) without needing reverse=True to fight the family-rank key."""
+    __slots__ = ("key",)
+
+    def __init__(self, key):
+        self.key = key
+
+    def __lt__(self, other):
+        # invert: we are "less than" (sort earlier) when our natural key is
+        # greater, giving descending order for this sub-key only.
+        return self.key > other.key
+
+    def __eq__(self, other):
+        return self.key == other.key
+
+
 def _key_entry(provider: str) -> str:
     return "ApiKey_" + provider
 
