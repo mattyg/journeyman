@@ -39,9 +39,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.send_btn.clicked.connect(self._on_send)
         self.input.returnPressed.connect(self._on_send)  # Enter sends
         self.undo_btn.clicked.connect(self._on_undo)
-        self.resultReady.connect(self._append)
-        self.intentAsked.connect(self._ask_intent)  # runs on the GUI thread
-        self.busyChanged.connect(self._set_busy)
+        # These signals are emitted from the worker thread, so force a queued
+        # connection: the slots must run on the GUI thread (QMessageBox and
+        # QTextEdit use timers that must not start on a worker thread).
+        self.resultReady.connect(self._append, QtCore.Qt.QueuedConnection)
+        self.intentAsked.connect(self._ask_intent, QtCore.Qt.QueuedConnection)
+        self.busyChanged.connect(self._set_busy, QtCore.Qt.QueuedConnection)
         self._busy = False
         # Route client diagnostics to the FreeCAD report view so a "no response"
         # can be traced (e.g. model replied with text instead of a tool call).
