@@ -144,3 +144,51 @@ def test_part_design_policy_rejects_part_shortcut_and_accepts_native_tree():
             "type": "PartDesign::Pad", "label": "Pad", "body": "Body"},
     }}
     assert not cad_workflow.part_design_issues(before, native)
+
+
+# --- read-only script detection (gate exemption for diagnosis) ---
+
+DIAGNOSTIC = """import FreeCAD as App
+import Part
+doc = App.ActiveDocument
+body = doc.getObject('HangerBody')
+sk = doc.getObject('PlateSketch')
+print('sketch edges', len(sk.Geometry), 'closed?', sk.Shape.isClosed())
+for i, g in enumerate(sk.Geometry):
+    print(i, g)
+"""
+
+
+def test_pure_diagnostic_script_is_read_only():
+    """The step the climbing-hanger transcript rejected: reads, prints, nothing else."""
+    assert cad_workflow.is_read_only_script(DIAGNOSTIC) is True
+
+
+def test_local_bindings_and_reads_stay_read_only():
+    assert cad_workflow.is_read_only_script(
+        "w = Part.Wire(sk.Shape.Edges)\nprint(w.isClosed())") is True
+
+
+def test_construction_and_mutation_are_not_read_only():
+    for script in (
+            "pad = body.newObject('PartDesign::Pad', 'PlatePad')",
+            "doc.addObject('Sketcher::SketchObject', 'S')",
+            "pad.Length = 4.0",
+            "sk.addGeometry(Part.LineSegment(a, b), False)",
+            "sk.addConstraint(c)",
+            "sk.clearGeometry()",
+            "doc.recompute()",
+            "obj.Placement.Base = v",
+            "values[0] = 3",
+            "del doc.Objects[0]"):
+        assert cad_workflow.is_read_only_script(script) is False, script
+
+
+def test_unparsable_script_is_never_treated_as_read_only():
+    assert cad_workflow.is_read_only_script("def (:") is False
+
+
+def test_inert_script_is_not_diagnosis():
+    """A no-op must not slip past the planning gates by changing nothing."""
+    assert cad_workflow.is_read_only_script("pass") is False
+    assert cad_workflow.is_read_only_script("x = 1") is False

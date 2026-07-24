@@ -274,3 +274,48 @@ def ledger_text(ledger):
                 **row)
             for row in features)
     return "\n".join(lines)
+
+
+_MUTATING_CALLS = frozenset((
+    "addObject", "newObject", "removeObject", "addGeometry", "delGeometry",
+    "delGeometries", "clearGeometry", "addConstraint", "delConstraint",
+    "recompute", "openTransaction", "commitTransaction", "abortTransaction",
+    "undo", "redo", "save", "saveAs", "copyObject", "moveObject",
+))
+
+
+def is_read_only_script(script):
+    """True when a script only observes the document and cannot change it.
+
+    Diagnosis must never be gated: an agent that cannot inspect after a failure
+    is left guessing, which is how a step repeats unchanged. Conservative — any
+    assignment to an attribute, any subscript store, any unrecognised mutating
+    call, or unparsable source counts as mutating.
+
+    A script must also actually *report* something to qualify. Otherwise an
+    inert placeholder (``pass``) would slip past the planning gates on the
+    technicality that it changes nothing.
+    """
+    import ast
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return False
+    reports = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            targets = getattr(node, "targets", None) or [node.target]
+            for target in targets:
+                # Binding a local name is fine; writing through an object is not.
+                if not isinstance(target, ast.Name):
+                    return False
+        elif isinstance(node, (ast.Delete, ast.Global, ast.Nonlocal)):
+            return False
+        elif isinstance(node, ast.Call):
+            name = getattr(node.func, "attr", None) or getattr(
+                node.func, "id", None)
+            if name in _MUTATING_CALLS:
+                return False
+            if name in ("print", "PrintMessage", "PrintWarning"):
+                reports = True
+    return reports

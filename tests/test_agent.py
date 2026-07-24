@@ -1109,3 +1109,74 @@ def test_feature_signature_ignores_cosmetic_script_changes():
     other_step = LLMProposal("hole", "x", "", True, plan_step=3)
     assert (_feature_signature(first, _occ_failure())
             != _feature_signature(other_step, _occ_failure()))
+
+
+def test_diagnostic_script_is_exempt_from_the_planning_gates():
+    """Turn 6 of the climbing-hanger transcript: a pure read-only diagnostic.
+
+    It carried no plan, ledger, or fidelity checklist and was rejected before
+    execution, leaving the model to guess at the failure. Diagnosis must run.
+    """
+    diagnostic = (
+        "doc = App.ActiveDocument\n"
+        "sk = doc.getObject('PlateSketch')\n"
+        "print('closed?', sk.Shape.isClosed())\n")
+    client = FakeClient([
+        LLMProposal("diagnose the pad", diagnostic, "", True, strategy=""),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "closed? False", "")])
+    shown = []
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, structured_cad_planning=True,
+                  assumption_ledger=True, mandatory_verification=False,
+                  final_design_review=False)).send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    assert not executor.results, "the diagnostic never ran"
+    assert not [text for text in shown if text.startswith("[")]
+
+
+def test_diagnostic_runs_without_a_replica_feature_checklist():
+    """A diagnostic carries no feature checklist; the pre-execution gate must
+    not block it. The *completion* fidelity check is unaffected — it still
+    requires a resolved checklist before the turn can be called done."""
+    diagnostic = "print(App.ActiveDocument.getObject('PlateSketch').Shape)\n"
+    client = FakeClient([
+        LLMProposal("diagnose", diagnostic, "", True, strategy=""),
+        LLMProposal("", "", "Done", False, kind="finish"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "shape", "")])
+    shown = []
+    _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, fidelity_target="replica",
+                  mandatory_verification=False, final_design_review=False)).send(
+            "replicate hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    # The diagnostic executed rather than being rejected before it ran.
+    assert not executor.results, "the diagnostic never ran"
+    assert not [text for text in shown if text.startswith("[")]
+
+
+def test_building_script_still_faces_the_planning_gates():
+    """The exemption is narrow: anything that constructs is gated as before."""
+    client = FakeClient([
+        LLMProposal(
+            "pad it", "pad = body.newObject('PartDesign::Pad', 'P')", "",
+            True, strategy=""),
+        LLMProposal("", "", "Stopped", False, kind="finish"),
+    ])
+    shown = []
+    _agent(
+        client, FakeExecutor([]),
+        _settings(auto_approve_loop=True)).send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert any(text.startswith("[Part Design required]") for text in shown)

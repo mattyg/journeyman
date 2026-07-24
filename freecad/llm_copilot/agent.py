@@ -470,7 +470,12 @@ class Agent:
                     continue
                 return signal
 
-            if proposal.strategy != "part_design":
+            # A script that only reads the document is diagnosis, not
+            # construction: the planning gates have nothing to check, and
+            # blocking it would leave the model guessing after a failure.
+            diagnostic = cad_workflow.is_read_only_script(proposal.script)
+
+            if not diagnostic and proposal.strategy != "part_design":
                 turn.part_design_retries += 1
                 if turn.part_design_retries > max(
                         1, self.settings.self_correction_attempts):
@@ -484,7 +489,7 @@ class Agent:
                     proposal, on_tool_result)
                 continue
 
-            if self.settings.structured_cad_planning:
+            if self.settings.structured_cad_planning and not diagnostic:
                 issues = cad_workflow.proposal_issues(proposal)
                 if issues:
                     turn.planning_retries += 1
@@ -519,7 +524,7 @@ class Agent:
                 if proposal.success_criteria:
                     ledger["success_criteria"] = proposal.success_criteria
 
-            if (self.settings.assumption_ledger
+            if (self.settings.assumption_ledger and not diagnostic
                     and not turn.assumptions_accepted):
                 issues = cad_workflow.assumption_ledger_missing(proposal, turn)
                 if not issues and turn.ledger.get("assumptions") is not None:
@@ -586,7 +591,7 @@ class Agent:
                 turn.ledger["assumptions"] = merged
                 turn.assumption_retries = 0
 
-            if self.settings.fidelity_target == "replica":
+            if self.settings.fidelity_target == "replica" and not diagnostic:
                 features, issues = cad_workflow.fidelity_feature_issues(
                     turn.ledger.get("observed_features"),
                     proposal.observed_features)
