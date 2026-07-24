@@ -117,7 +117,12 @@ _ASSUMPTION_PROMPT = (
     "high-consequence assumptions "
     "must be resolved with ask_user before execution. Use at most three "
     "single-question calls with numeric choices in option labels, then resubmit "
-    "the script with the same ids and user_confirmed status/evidence.\n")
+    "the script with the same ids and user_confirmed status/evidence.\n"
+    "- Carry the ledger forward on every later call: ids are permanent, and a "
+    "row must never be dropped. You may reword a row's name freely as your "
+    "understanding sharpens. Changing a row's value or status needs evidence, "
+    "and rewording a row while changing its value or status reads as "
+    "redefining it — keep those separate.\n")
 
 _FIDELITY_MEANINGS = {
     "replica": "reproduce the reference faithfully",
