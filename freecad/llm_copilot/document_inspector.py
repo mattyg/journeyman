@@ -101,21 +101,70 @@ def document_state(app, rich=True):
     return {"document": doc.Name, "objects": objects}
 
 
+class DocumentDelta:
+    """The single derivation of "what changed" between two document snapshots.
+
+    All three consumers — offscreen rendering (which objects to render), the
+    model feedback diff, and the CAD-workflow review — read from one delta so
+    "changed" means exactly the same thing everywhere. ``before``/``after`` are
+    document-state dicts as returned by :func:`document_state`.
+    """
+
+    def __init__(self, before, after):
+        self.old = before.get("objects", {})
+        self.new = after.get("objects", {})
+
+    @property
+    def created(self):
+        """Names present only in the after state."""
+        return sorted(self.new.keys() - self.old.keys())
+
+    @property
+    def deleted(self):
+        """Names present only in the before state."""
+        return sorted(self.old.keys() - self.new.keys())
+
+    @property
+    def modified(self):
+        """Names present in both states whose recorded properties differ."""
+        return sorted(
+            name for name in self.old.keys() & self.new.keys()
+            if self.old[name] != self.new[name])
+
+    @property
+    def changed_names(self):
+        """Created or modified names, sorted — objects worth re-rendering."""
+        return sorted(
+            name for name in self.new
+            if name not in self.old or self.old.get(name) != self.new.get(name))
+
+    def created_types(self):
+        """The set of type ids among newly-created objects."""
+        return {self.new[name].get("type", "") for name in self.created}
+
+    def structured(self):
+        """Human/model-readable created/deleted/modified summary."""
+        lines = []
+        for name in self.created:
+            lines.append(
+                "Created: " + name + " " + json.dumps(self.new[name], sort_keys=True))
+        for name in self.deleted:
+            lines.append(
+                "Deleted: " + name + " " + json.dumps(self.old[name], sort_keys=True))
+        for name in self.modified:
+            changes = []
+            for key in sorted(set(self.old[name]) | set(self.new[name])):
+                if self.old[name].get(key) != self.new[name].get(key):
+                    changes.append(
+                        f"{key}: {self.old[name].get(key)!r} -> "
+                        f"{self.new[name].get(key)!r}")
+            if changes:
+                lines.append("Modified: " + name + "\n  " + "\n  ".join(changes))
+        return "\n".join(lines) or "No observable document changes."
+
+
 def structured_diff(before, after):
-    old, new = before.get("objects", {}), after.get("objects", {})
-    lines = []
-    for name in sorted(new.keys() - old.keys()):
-        lines.append("Created: " + name + " " + json.dumps(new[name], sort_keys=True))
-    for name in sorted(old.keys() - new.keys()):
-        lines.append("Deleted: " + name + " " + json.dumps(old[name], sort_keys=True))
-    for name in sorted(old.keys() & new.keys()):
-        changes = []
-        for key in sorted(set(old[name]) | set(new[name])):
-            if old[name].get(key) != new[name].get(key):
-                changes.append(f"{key}: {old[name].get(key)!r} -> {new[name].get(key)!r}")
-        if changes:
-            lines.append("Modified: " + name + "\n  " + "\n  ".join(changes))
-    return "\n".join(lines) or "No observable document changes."
+    return DocumentDelta(before, after).structured()
 
 
 def validate(app, names=None):

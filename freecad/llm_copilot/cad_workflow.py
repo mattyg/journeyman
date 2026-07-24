@@ -23,12 +23,10 @@ def proposal_issues(proposal):
 
 def review_step(before, after, proposal, settings):
     """Inspect a before/after document state for workflow-specific warnings."""
-    old = before.get("objects", {})
-    new = after.get("objects", {})
-    changed = {
-        name for name in new
-        if name not in old or new[name] != old.get(name)
-    }
+    from .document_inspector import DocumentDelta
+    delta = DocumentDelta(before, after)
+    new = delta.new
+    changed = set(delta.changed_names)
     warnings = []
 
     if settings.sketch_constraint_verification:
@@ -46,8 +44,7 @@ def review_step(before, after, proposal, settings):
                     f"{name} has no stable attachment; consider an origin plane "
                     "or datum reference")
 
-    created_types = {
-        item.get("type", "") for name, item in new.items() if name not in old}
+    created_types = delta.created_types()
     if settings.parametric_feature_preference:
         if (proposal.strategy == "part_design"
                 and "Part::Feature" in created_types):

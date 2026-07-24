@@ -8,10 +8,10 @@ from .history_store import is_internal_object
 
 
 def changed_object_names(before, after):
-    old = before.get("objects", {})
-    new = after.get("objects", {})
-    return sorted(name for name in new
-                  if name not in old or old.get(name) != new.get(name))
+    # Thin shim over the single change derivation in document_inspector so
+    # rendering and the model feedback agree on what "changed" means.
+    from .document_inspector import DocumentDelta
+    return DocumentDelta(before, after).changed_names
 
 
 def _final_shape_objects(doc, names=None):
