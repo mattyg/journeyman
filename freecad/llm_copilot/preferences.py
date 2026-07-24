@@ -183,6 +183,7 @@ class LLMCopilotPreferencesPage:
         wf = QtGui.QVBoxLayout(workflow)
         workflow_flags = [
             ("planningCheck", "Require a structured design plan before editing"),
+            ("assumptionCheck", "Require a numeric assumption ledger"),
             ("parametricCheck", "Prefer editable parametric features"),
             ("sketchCheck", "Check sketch constraints and attachment"),
             ("stageCheck", "Guide sketch, additive, subtractive, finish order"),
@@ -193,6 +194,18 @@ class LLMCopilotPreferencesPage:
             widget = QtGui.QCheckBox(label)
             setattr(self, attr, widget)
             wf.addWidget(widget)
+        fidelity_form = QtGui.QFormLayout()
+        self.fidelityCombo = QtGui.QComboBox()
+        self.fidelityCombo.addItem("Unspecified", "unspecified")
+        self.fidelityCombo.addItem("Replica", "replica")
+        self.fidelityCombo.addItem("Stylised", "stylised")
+        self.fidelityCombo.addItem(
+            "Functional analogue", "functional_analogue")
+        fidelity_form.addRow("Fidelity target", self.fidelityCombo)
+        wf.addLayout(fidelity_form)
+        self.inferredCheck = QtGui.QCheckBox(
+            "Mark features not visible in the reference as INFERRED")
+        wf.addWidget(self.inferredCheck)
         workflow.setToolTip(
             "Independent experimental controls that encourage a human-like, "
             "editable CAD design process.")
@@ -227,6 +240,12 @@ class LLMCopilotPreferencesPage:
             widget.setChecked(p.GetBool(key, default))
         for widget, key, default in self._workflow_controls():
             widget.setChecked(p.GetBool(key, default))
+        fidelity = p.GetString("FidelityTarget", "unspecified")
+        fidelity_index = self.fidelityCombo.findData(fidelity)
+        self.fidelityCombo.setCurrentIndex(
+            fidelity_index if fidelity_index >= 0 else 0)
+        self.inferredCheck.setChecked(
+            p.GetBool("MarkInferredFeatures", False))
         strategy = p.GetString("RenderStrategy", "global_and_changed")
         strategy_index = self.renderStrategyCombo.findData(strategy)
         self.renderStrategyCombo.setCurrentIndex(
@@ -252,6 +271,8 @@ class LLMCopilotPreferencesPage:
             p.SetBool(key, widget.isChecked())
         for widget, key, _default in self._workflow_controls():
             p.SetBool(key, widget.isChecked())
+        p.SetString("FidelityTarget", self.fidelityCombo.currentData())
+        p.SetBool("MarkInferredFeatures", self.inferredCheck.isChecked())
         p.SetString("RenderStrategy", self.renderStrategyCombo.currentData())
         p.SetInt("MaxIsolatedImages", self.maxIsolatedSpin.value())
         # provider/key/host/model are saved eagerly on edit; persist current
@@ -284,6 +305,7 @@ class LLMCopilotPreferencesPage:
     def _workflow_controls(self):
         return [
             (self.planningCheck, "StructuredCADPlanning", True),
+            (self.assumptionCheck, "AssumptionLedger", False),
             (self.parametricCheck, "ParametricFeaturePreference", True),
             (self.sketchCheck, "SketchConstraintVerification", True),
             (self.stageCheck, "StageOrderGuidance", True),

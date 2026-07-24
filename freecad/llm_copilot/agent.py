@@ -28,6 +28,10 @@ class _Turn:
         self.planning_retries = 0
         self.completion_retries = 0
         self.question_retries = 0
+        self.assumption_retries = 0
+        self.assumptions_accepted = False
+        self.assumption_clarification = False
+        self.assumption_questions = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -307,6 +311,27 @@ class Agent:
                 self._handle_inspect(proposal, turn)
                 continue
             if proposal.kind == "question":
+                if turn.assumption_clarification:
+                    if turn.assumption_questions >= 3:
+                        turn.assumption_retries += 1
+                        if turn.assumption_retries > max(
+                                1, self.settings.self_correction_attempts):
+                            summary = (
+                                "I couldn't resolve the blocking assumptions "
+                                "within the clarification limit.")
+                            self.messages.append(
+                                {"role": "assistant", "content": summary})
+                            return summary
+                        self.messages.append({
+                            "role": "user",
+                            "content": (
+                                "[assumption clarification limit]\n"
+                                "The one-round limit of three questions has "
+                                "been reached. Resubmit the script with the "
+                                "user selections incorporated."),
+                        })
+                        continue
+                    turn.assumption_questions += 1
                 signal = self._handle_question(
                     proposal, turn, on_question, check_cancelled)
                 if signal is LOOP:
@@ -364,6 +389,94 @@ class Agent:
                     ledger["plan"] = proposal.plan
                 if proposal.success_criteria:
                     ledger["success_criteria"] = proposal.success_criteria
+
+            if (self.settings.assumption_ledger
+                    and not turn.assumptions_accepted):
+                issues = cad_workflow.assumption_ledger_missing(proposal, turn)
+                if not issues and turn.ledger.get("assumptions") is not None:
+                    merged, merge_issues = cad_workflow.merge_assumptions(
+                        turn.ledger["assumptions"], proposal.assumptions)
+                    issues.extend(merge_issues)
+                else:
+                    merged = tuple(
+                        dict(row) for row in (proposal.assumptions or ()))
+                if issues:
+                    turn.assumption_retries += 1
+                    if turn.assumption_retries > max(
+                            1, self.settings.self_correction_attempts):
+                        summary = (
+                            "I couldn't produce a valid assumption ledger: "
+                            + "; ".join(issues) + ".")
+                        self.messages.append(
+                            {"role": "assistant", "content": summary})
+                        return summary
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[assumption ledger required]\n"
+                            + "\n".join("- " + issue for issue in issues)
+                            + "\nResubmit the script with a corrected ledger; "
+                            "the document has not been edited."),
+                    })
+                    continue
+                turn.ledger["assumptions"] = merged
+                blocking = cad_workflow.blocking_assumptions(merged)
+                if blocking:
+                    turn.assumption_clarification = True
+                    ids = ", ".join(row["id"] for row in blocking)
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[assumption clarification required]\n"
+                            f"Blocking assumption ids: {ids}. The script was "
+                            "not executed. Use ask_user (at most three "
+                            "single-question calls total), then resubmit this "
+                            "script with the same ids, updated values/status, "
+                            "and evidence citing the user's selection."),
+                    })
+                    continue
+                if (turn.assumption_clarification
+                        and turn.assumption_questions == 0):
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[assumption clarification required]\n"
+                            "Call ask_user before marking a blocking assumption "
+                            "as confirmed. The script was not executed."),
+                    })
+                    continue
+                turn.assumptions_accepted = True
+                turn.assumption_clarification = False
+                turn.assumption_retries = 0
+            elif (self.settings.assumption_ledger
+                  and proposal.assumptions is not None):
+                issues = cad_workflow.assumption_ledger_missing(
+                    proposal, type("_Pending", (), {
+                        "assumptions_accepted": False})())
+                merged, merge_issues = cad_workflow.merge_assumptions(
+                    turn.ledger.get("assumptions", ()), proposal.assumptions)
+                issues.extend(merge_issues)
+                if issues:
+                    turn.assumption_retries += 1
+                    if turn.assumption_retries > max(
+                            1, self.settings.self_correction_attempts):
+                        summary = (
+                            "I couldn't update the assumption ledger safely: "
+                            + "; ".join(issues) + ".")
+                        self.messages.append(
+                            {"role": "assistant", "content": summary})
+                        return summary
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[invalid assumption update]\n"
+                            + "\n".join("- " + issue for issue in issues)
+                            + "\nKeep stable ids and provide evidence for "
+                            "changed values or statuses."),
+                    })
+                    continue
+                turn.ledger["assumptions"] = merged
+                turn.assumption_retries = 0
 
             # record the assistant's tool intent and design stage in history
             workflow_line = ""

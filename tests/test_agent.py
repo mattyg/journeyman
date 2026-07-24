@@ -456,6 +456,58 @@ def test_structured_plan_is_required_before_execution_and_ledger_is_sent():
     assert "[design ledger]" in str(client.calls[-1])
 
 
+def test_blocking_assumption_requires_question_before_execution():
+    row = {
+        "id": "width", "name": "Width", "value": 20.0, "unit": "mm",
+        "source": "photo estimate", "confidence": "low",
+        "consequence": "high", "if_wrong": "scale is wrong",
+        "status": "unverified", "evidence": "",
+    }
+    confirmed = dict(
+        row, value=25.0, status="user_confirmed",
+        evidence="User selected 25 mm")
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True, assumptions=(row,)),
+        LLMProposal("", "", "", False, kind="question",
+                    question="Choose width",
+                    options=(
+                        {"id": "20", "label": "20 mm", "description": "narrow"},
+                        {"id": "25", "label": "25 mm", "description": "wide"},
+                    )),
+        LLMProposal("build", "pass", "", True, assumptions=(confirmed,)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(assumption_ledger=True, auto_approve_loop=True)).send(
+            "make it", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_question=lambda _proposal: ["25"])
+    assert out == "Done"
+    assert not executor.results
+    assert any("[assumption clarification required]" in str(call)
+               for call in client.calls)
+
+
+def test_missing_assumption_ledger_is_corrected_before_execution():
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True),
+        LLMProposal("build", "pass", "", True, assumptions=()),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(assumption_ledger=True, auto_approve_loop=True)).send(
+            "make it", lambda _intent: True,
+            lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert not executor.results
+    assert any("[assumption ledger required]" in str(call)
+               for call in client.calls)
+
+
 def test_user_images_are_sent_in_initial_multimodal_message():
     client = FakeClient([LLMProposal("", "", "I see it.", False)])
     out = _agent(client, FakeExecutor([]), _settings()).send(

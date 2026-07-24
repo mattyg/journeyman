@@ -47,6 +47,9 @@ def test_defaults_when_unset():
     assert s.color_separate_objects is True
     assert s.depth_enhanced_shading is True
     assert s.freecad_api_lookup is True
+    assert s.assumption_ledger is False
+    assert s.fidelity_target == "unspecified"
+    assert s.mark_inferred_features is False
 
 
 def test_per_provider_keys_are_isolated():
@@ -155,6 +158,9 @@ def test_harness_feature_flags_roundtrip():
     settings.color_separate_objects = False
     settings.depth_enhanced_shading = False
     settings.freecad_api_lookup = False
+    settings.assumption_ledger = True
+    settings.fidelity_target = "stylised"
+    settings.mark_inferred_features = True
     save_settings(p, settings)
     loaded = load_settings(p)
     assert loaded.enhanced_validation is False
@@ -177,3 +183,6 @@ def test_harness_feature_flags_roundtrip():
     assert loaded.color_separate_objects is False
     assert loaded.depth_enhanced_shading is False
     assert loaded.freecad_api_lookup is False
+    assert loaded.assumption_ledger is True
+    assert loaded.fidelity_target == "stylised"
+    assert loaded.mark_inferred_features is True

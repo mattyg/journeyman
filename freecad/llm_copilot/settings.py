@@ -82,6 +82,9 @@ class Settings:
     color_separate_objects: bool = False
     depth_enhanced_shading: bool = False
     freecad_api_lookup: bool = True
+    assumption_ledger: bool = False
+    fidelity_target: str = "unspecified"
+    mark_inferred_features: bool = False
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -244,6 +247,10 @@ def load_settings(param_get) -> "Settings":
         "RenderStrategy", "global_and_changed")
     if render_strategy not in RENDER_STRATEGIES:
         render_strategy = "global_and_changed"
+    fidelity_target = param_get.GetString("FidelityTarget", "unspecified")
+    if fidelity_target not in (
+            "unspecified", "replica", "stylised", "functional_analogue"):
+        fidelity_target = "unspecified"
     return Settings(
         model=_resolve_model(provider, bare_model),
         api_key=get_api_key(param_get, provider),
@@ -281,6 +288,10 @@ def load_settings(param_get) -> "Settings":
         depth_enhanced_shading=param_get.GetBool(
             "DepthEnhancedShading", True),
         freecad_api_lookup=param_get.GetBool("FreeCADAPILookup", True),
+        assumption_ledger=param_get.GetBool("AssumptionLedger", False),
+        fidelity_target=fidelity_target,
+        mark_inferred_features=param_get.GetBool(
+            "MarkInferredFeatures", False),
     )
 
 
@@ -318,6 +329,9 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetBool(
         "DepthEnhancedShading", settings.depth_enhanced_shading)
     param_get.SetBool("FreeCADAPILookup", settings.freecad_api_lookup)
+    param_get.SetBool("AssumptionLedger", settings.assumption_ledger)
+    param_get.SetString("FidelityTarget", settings.fidelity_target)
+    param_get.SetBool("MarkInferredFeatures", settings.mark_inferred_features)
     if "/" in settings.model:
         provider, bare = settings.model.split("/", 1)
         if provider in PROVIDERS:

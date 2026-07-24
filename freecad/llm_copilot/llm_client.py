@@ -105,6 +105,49 @@ _STAGE_PROMPT = (
     "verify; skip stages that do not apply, and return to an earlier stage when "
     "a correction requires it. Fillets/chamfers generally come last.\n")
 
+_ASSUMPTION_PROMPT = (
+    "- On the first script call, list every numeric value not supplied by the "
+    "user in assumptions. Use stable ids, numeric values and units; sort rows "
+    "by consequence high to low. Low-confidence, high-consequence assumptions "
+    "must be resolved with ask_user before execution. Use at most three "
+    "single-question calls with numeric choices in option labels, then resubmit "
+    "the script with the same ids and user_confirmed status/evidence.\n")
+
+_FIDELITY_MEANINGS = {
+    "replica": "reproduce the reference faithfully",
+    "stylised": (
+        "keep the gesture, discard surface detail, and ignore extra reference "
+        "detail"),
+    "functional_analogue": "match function rather than appearance",
+}
+
+_INFERRED_PROMPT = (
+    "- Build features required by the description but not visible in the "
+    "reference, and name or comment every such feature INFERRED. Never invent "
+    "a feature silently.\n")
+
+_ASSUMPTION_ITEM = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "value": {"type": "number"},
+        "unit": {"type": "string"},
+        "source": {"type": "string"},
+        "confidence": {"type": "string",
+                       "enum": ["high", "medium", "low"]},
+        "consequence": {"type": "string",
+                        "enum": ["high", "medium", "low"]},
+        "if_wrong": {"type": "string"},
+        "status": {"type": "string",
+                   "enum": ["unverified", "user_confirmed", "measured"]},
+        "evidence": {"type": "string"},
+    },
+    "required": [
+        "id", "name", "value", "unit", "source", "confidence",
+        "consequence", "if_wrong", "status", "evidence"],
+}
+
 # The model always calls exactly one available tool (tool_choice is forced), so it
 # can never emit a free-text reply — which structurally prevents scripts from
 # leaking into prose. run_freecad_script = do work; finish = the turn is done.
@@ -286,6 +329,15 @@ def _system_prompt(settings):
         prompt += _SKETCH_PROMPT
     if settings.stage_order_guidance:
         prompt += _STAGE_PROMPT
+    if settings.assumption_ledger:
+        prompt += _ASSUMPTION_PROMPT
+    if settings.fidelity_target != "unspecified":
+        meaning = _FIDELITY_MEANINGS.get(settings.fidelity_target)
+        if meaning:
+            prompt += (
+                f"- Fidelity target: {settings.fidelity_target}; {meaning}.\n")
+    if settings.mark_inferred_features:
+        prompt += _INFERRED_PROMPT
     if settings.final_design_review:
         prompt += (
             "- Before finish, compare the finished feature tree, measurements, "
@@ -324,6 +376,12 @@ def _openai_tools(settings):
                       if t["function"]["name"] == _TOOL_NAME)
         script["parameters"]["required"] += [
             "strategy", "stage", "plan", "plan_step", "success_criteria"]
+    if settings.assumption_ledger:
+        script = next(t["function"] for t in tools
+                      if t["function"]["name"] == _TOOL_NAME)
+        script["parameters"]["properties"]["assumptions"] = {
+            "type": "array", "items": copy.deepcopy(_ASSUMPTION_ITEM)}
+        script["parameters"]["required"].append("assumptions")
     if settings.final_design_review:
         script = next(t["function"] for t in tools
                       if t["function"]["name"] == _TOOL_NAME)
@@ -374,6 +432,7 @@ class LLMProposal:
     plan: tuple = ()
     plan_step: int = 0
     success_criteria: tuple = ()
+    assumptions: object = None
     reviewed_plan: bool = False
     question: str = ""
     options: tuple = ()
@@ -583,7 +642,10 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
             strategy=args.get("strategy", ""), stage=args.get("stage", ""),
             plan=tuple(args.get("plan") or ()),
             plan_step=int(args.get("plan_step") or 0),
-            success_criteria=tuple(args.get("success_criteria") or ()))
+            success_criteria=tuple(args.get("success_criteria") or ()),
+            assumptions=tuple(
+                dict(row) for row in (args.get("assumptions") or ())
+                if isinstance(row, dict)))
     if name == _FINISH_NAME:
         return LLMProposal(
             intent="", script="", text=args.get("summary", "") or text,

@@ -106,6 +106,42 @@ def test_structured_workflow_fields_are_required_and_parsed(monkeypatch):
         run["parameters"]["required"])
 
 
+def test_assumption_schema_is_gated_and_rows_are_parsed():
+    settings = _settings()
+    disabled = next(
+        t["function"] for t in lc._openai_tools(settings)
+        if t["function"]["name"] == "run_freecad_script")
+    assert "assumptions" not in disabled["parameters"]["properties"]
+    settings.assumption_ledger = True
+    enabled = next(
+        t["function"] for t in lc._openai_tools(settings)
+        if t["function"]["name"] == "run_freecad_script")
+    assert "assumptions" in enabled["parameters"]["required"]
+    row = {
+        "id": "w", "name": "Width", "value": 10, "unit": "mm",
+        "source": "photo", "confidence": "low", "consequence": "high",
+        "if_wrong": "scale", "status": "unverified", "evidence": "",
+    }
+    proposal = lc._proposal_from_tool(
+        lc._TOOL_NAME, {"intent": "i", "script": "s",
+                        "assumptions": [row]})
+    assert proposal.assumptions[0]["id"] == "w"
+
+
+def test_assumption_fidelity_and_inferred_prompt_fragments_are_gated():
+    settings = _settings()
+    base = lc.system_prompt(settings)
+    assert "numeric value not supplied" not in base
+    assert "Fidelity target:" not in base
+    settings.assumption_ledger = True
+    settings.fidelity_target = "stylised"
+    settings.mark_inferred_features = True
+    prompt = lc.system_prompt(settings)
+    assert "numeric value not supplied" in prompt
+    assert "Fidelity target: stylised" in prompt
+    assert "INFERRED" in prompt
+
+
 def test_openai_forces_tool_choice(monkeypatch):
     captured = {}
     _patch_http(monkeypatch,

@@ -44,3 +44,53 @@ def test_ledger_is_compact_and_records_warnings():
     assert "✓ Sketch profile" in text
     assert "○ Pad it" in text
     assert "Profile is under-constrained" in text
+
+
+def _assumption(**changes):
+    row = {
+        "id": "width", "name": "Width", "value": 20.0, "unit": "mm",
+        "source": "estimated from photo", "confidence": "medium",
+        "consequence": "high", "if_wrong": "overall scale is wrong",
+        "status": "unverified", "evidence": "",
+    }
+    row.update(changes)
+    return row
+
+
+def test_assumption_ledger_validation_and_blocking():
+    turn = SimpleNamespace(assumptions_accepted=False)
+    assert cad_workflow.assumption_ledger_missing(
+        SimpleNamespace(assumptions=None), turn)
+    assert not cad_workflow.assumption_ledger_missing(
+        SimpleNamespace(assumptions=()), turn)
+    rows = (_assumption(confidence="low"),)
+    assert not cad_workflow.assumption_ledger_missing(
+        SimpleNamespace(assumptions=rows), turn)
+    assert cad_workflow.blocking_assumptions(rows) == rows
+
+
+def test_assumption_ledger_rejects_bad_order_and_duplicate_ids():
+    rows = (
+        _assumption(consequence="low"),
+        _assumption(consequence="high"),
+    )
+    issues = cad_workflow.assumption_ledger_missing(
+        SimpleNamespace(assumptions=rows),
+        SimpleNamespace(assumptions_accepted=False))
+    assert any("duplicate" in issue for issue in issues)
+    assert any("sorted" in issue for issue in issues)
+
+
+def test_merge_assumptions_requires_evidence_and_ledger_renders_rows():
+    before = (_assumption(),)
+    changed = (_assumption(value=25.0),)
+    _merged, issues = cad_workflow.merge_assumptions(before, changed)
+    assert any("evidence" in issue for issue in issues)
+    confirmed = (_assumption(
+        value=25.0, status="user_confirmed",
+        evidence="User selected 25 mm"),)
+    merged, issues = cad_workflow.merge_assumptions(before, confirmed)
+    assert not issues
+    text = cad_workflow.ledger_text({"assumptions": merged})
+    assert "Width=25.0 mm" in text
+    assert "user_confirmed" in text

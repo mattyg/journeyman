@@ -3,6 +3,8 @@
 STAGES = ("analyze", "sketch", "additive", "subtractive", "finish", "verify")
 STRATEGIES = (
     "part_design", "part", "surface", "modify_existing", "inspection")
+LEVELS = ("high", "medium", "low")
+STATUSES = ("unverified", "user_confirmed", "measured")
 
 
 def proposal_issues(proposal):
@@ -19,6 +21,84 @@ def proposal_issues(proposal):
     if not proposal.success_criteria:
         issues.append("provide measurable success criteria")
     return issues
+
+
+def assumption_ledger_missing(proposal, turn_state):
+    """Return validation issues for the first script's assumption ledger."""
+    if getattr(turn_state, "assumptions_accepted", False):
+        return []
+    rows = getattr(proposal, "assumptions", None)
+    if rows is None:
+        return ["provide an assumption ledger (use [] when none are needed)"]
+    issues = []
+    seen = set()
+    previous_rank = -1
+    for index, row in enumerate(rows, 1):
+        prefix = f"assumption {index}"
+        if not isinstance(row, dict):
+            issues.append(prefix + " must be an object")
+            continue
+        row_id = str(row.get("id", "")).strip()
+        if not row_id:
+            issues.append(prefix + " needs a stable id")
+        elif row_id in seen:
+            issues.append(prefix + " has a duplicate id")
+        seen.add(row_id)
+        for field in ("name", "unit", "source", "if_wrong"):
+            if not str(row.get(field, "")).strip():
+                issues.append(f"{prefix} needs {field}")
+        value = row.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            issues.append(prefix + " value must be numeric")
+        confidence = row.get("confidence")
+        consequence = row.get("consequence")
+        status = row.get("status")
+        if confidence not in LEVELS:
+            issues.append(prefix + " has invalid confidence")
+        if consequence not in LEVELS:
+            issues.append(prefix + " has invalid consequence")
+        else:
+            rank = LEVELS.index(consequence)
+            if rank < previous_rank:
+                issues.append("assumptions must be sorted high to low consequence")
+            previous_rank = rank
+        if status not in STATUSES:
+            issues.append(prefix + " has invalid status")
+        if "evidence" not in row:
+            issues.append(prefix + " needs evidence (empty when unverified)")
+        elif status in ("user_confirmed", "measured") and not str(
+                row.get("evidence", "")).strip():
+            issues.append(prefix + " needs evidence for its status")
+    return issues
+
+
+def blocking_assumptions(assumptions):
+    return tuple(
+        row for row in assumptions
+        if row.get("confidence") == "low"
+        and row.get("consequence") == "high"
+        and row.get("status") == "unverified")
+
+
+def merge_assumptions(previous, proposed):
+    """Merge rows while preventing silent deletion or unsupported promotion."""
+    if not previous:
+        return tuple(dict(row) for row in proposed), []
+    old = {row["id"]: row for row in previous}
+    new = {row.get("id"): row for row in proposed}
+    issues = []
+    for row_id, before in old.items():
+        after = new.get(row_id)
+        if after is None:
+            issues.append(f"assumption {row_id} was removed")
+            continue
+        if after.get("name") != before.get("name"):
+            issues.append(f"assumption {row_id} was renamed")
+        changed = after.get("value") != before.get("value")
+        promoted = after.get("status") in ("user_confirmed", "measured")
+        if (changed or promoted) and not str(after.get("evidence", "")).strip():
+            issues.append(f"assumption {row_id} changed without evidence")
+    return tuple(dict(row) for row in proposed), issues
 
 
 def review_step(before, after, proposal, settings):
@@ -95,4 +175,12 @@ def ledger_text(ledger):
     if warnings:
         lines.append("Open workflow warnings:")
         lines.extend("- " + warning for warning in warnings)
+    assumptions = ledger.get("assumptions", ())
+    if assumptions:
+        lines.append("Assumptions:")
+        lines.extend(
+            "- {id}: {name}={value} {unit}; source={source}; "
+            "confidence={confidence}; consequence={consequence}; "
+            "status={status}; evidence={evidence}".format(**row)
+            for row in assumptions)
     return "\n".join(lines)
