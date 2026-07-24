@@ -303,6 +303,11 @@ class Agent:
         """Ledger validation for a turn that has not yet accepted assumptions."""
         from . import cad_workflow, turn_protocol
         if turn.assumptions_accepted:
+            # Assumptions were accepted earlier this turn; a later step may
+            # still update them, and those updates still need checking.
+            if proposal.assumptions is not None:
+                return self._assumption_update_checks(
+                    proposal, turn, advisories, limit)
             return None
         # Stage 2: ask for assumptions before the first build. Advisory — the
         # request is what matters, and refusing to run without one costs a turn.
@@ -317,6 +322,8 @@ class Agent:
             return None
         issues = cad_workflow.assumption_ledger_missing(proposal, turn)
         if not issues and turn.ledger.get("assumptions") is not None:
+            advisories.extend(cad_workflow.relabelled_assumptions(
+                turn.ledger["assumptions"], proposal.assumptions))
             merged, merge_issues = cad_workflow.merge_assumptions(
                 turn.ledger["assumptions"], proposal.assumptions)
             issues.extend(merge_issues)
@@ -351,6 +358,8 @@ class Agent:
         from . import cad_workflow
         issues = cad_workflow.assumption_ledger_missing(
             proposal, type("_Pending", (), {"assumptions_accepted": False})())
+        advisories.extend(cad_workflow.relabelled_assumptions(
+            turn.ledger.get("assumptions", ()), proposal.assumptions))
         merged, merge_issues = cad_workflow.merge_assumptions(
             turn.ledger.get("assumptions", ()), proposal.assumptions)
         issues.extend(merge_issues)

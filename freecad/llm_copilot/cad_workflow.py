@@ -93,11 +93,35 @@ def blocking_assumptions(assumptions):
         and row.get("status") == "unverified")
 
 
+def relabelled_assumptions(previous, proposed):
+    """Rows whose ``name`` was reworded while value and status held steady.
+
+    A relabel is the model describing the same assumption better as its
+    understanding sharpens — worth showing, never worth discarding a script
+    over. Only a rename *combined* with a value or status change is a
+    redefinition; :func:`merge_assumptions` treats that as an issue.
+    """
+    old = {row["id"]: row for row in (previous or ())}
+    notes = []
+    for row in proposed or ():
+        before = old.get(row.get("id"))
+        if before is None:
+            continue
+        if (row.get("name") != before.get("name")
+                and row.get("value") == before.get("value")
+                and row.get("status") == before.get("status")):
+            notes.append(
+                "assumption {} relabelled: \"{}\" -> \"{}\"".format(
+                    row.get("id"), before.get("name"), row.get("name")))
+    return notes
+
+
 def merge_assumptions(previous, proposed):
     """Merge rows while preventing silent deletion or unsupported promotion.
 
     The merged ledger is sorted most-severe first here rather than demanded of
-    the model, so presentation order can never block a step.
+    the model, so presentation order can never block a step. A row may be
+    reworded freely; see :func:`relabelled_assumptions`.
     """
     if not previous:
         return sort_assumptions(dict(row) for row in proposed), []
@@ -109,10 +133,15 @@ def merge_assumptions(previous, proposed):
         if after is None:
             issues.append(f"assumption {row_id} was removed")
             continue
-        if after.get("name") != before.get("name"):
-            issues.append(f"assumption {row_id} was renamed")
         changed = after.get("value") != before.get("value")
         promoted = after.get("status") in ("user_confirmed", "measured")
+        renamed = after.get("name") != before.get("name")
+        if renamed and (changed or promoted):
+            # Rewording a row *while* moving its value or status is how an
+            # assumption is silently redefined under a stable id.
+            issues.append(
+                "assumption {} was redefined: \"{}\" -> \"{}\"".format(
+                    row_id, before.get("name"), after.get("name")))
         if (changed or promoted) and not str(after.get("evidence", "")).strip():
             issues.append(f"assumption {row_id} changed without evidence")
     return sort_assumptions(dict(row) for row in proposed), issues

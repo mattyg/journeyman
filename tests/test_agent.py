@@ -1526,3 +1526,51 @@ def test_blocking_assumption_still_stops_the_step():
     assert not executor.results
     assert any("[assumption clarification required]" in str(c)
                for c in client.calls)
+
+
+def test_relabelled_ledger_row_runs_the_script():
+    """Transcript 3: a complete hanger discarded because A5 was reworded."""
+    first = _assumption(
+        id="A5", name="Carabiner opening height", value=30.0,
+        consequence="low", confidence="medium")
+    relabelled = _assumption(
+        id="A5", name="Opening height (stadium)", value=30.0,
+        consequence="low", confidence="medium")
+    client = FakeClient([
+        LLMProposal("start", "pass", "", True, assumptions=(first,)),
+        LLMProposal("build the hanger", "pass", "", True,
+                    assumptions=(relabelled,)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
+    shown = []
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, assumption_ledger=True)).send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    assert not executor.results, "the relabelled step never ran"
+    assert not [t for t in shown if t.startswith("[")]
+    # The relabel is still surfaced, just not as a rejection.
+    assert any("relabelled" in str(call) for call in client.calls)
+
+
+def test_redefined_ledger_row_is_still_reported():
+    """Rewording *and* moving a value is silent redefinition, not a relabel."""
+    first = _assumption(id="A5", name="Opening height", value=30.0)
+    redefined = _assumption(
+        id="A5", name="Opening width", value=20.0, evidence="measured")
+    client = FakeClient([
+        LLMProposal("start", "pass", "", True, assumptions=(first,)),
+        LLMProposal("build", "pass", "", True, assumptions=(redefined,)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, assumption_ledger=True)).send(
+            "model it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert any("redefined" in str(call) for call in client.calls)

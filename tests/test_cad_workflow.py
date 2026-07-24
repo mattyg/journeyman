@@ -298,3 +298,48 @@ def test_every_noop_block_kind_is_reported_with_its_line():
 
 def test_unparsable_script_yields_no_noop_issues():
     assert cad_workflow.noop_block_issues("def (:") == []
+
+
+# --- relabel vs redefinition ---
+
+def test_relabelled_row_is_not_an_issue():
+    """Transcript 3: a complete hanger was discarded because A5 was reworded."""
+    before = (_assumption(id="A5", name="Carabiner opening height", value=30.0),)
+    after = (_assumption(id="A5", name="Opening height (stadium)", value=30.0),)
+    _merged, issues = cad_workflow.merge_assumptions(before, after)
+    assert issues == []
+    notes = cad_workflow.relabelled_assumptions(before, after)
+    assert len(notes) == 1
+    assert "Carabiner opening height" in notes[0]
+    assert "Opening height (stadium)" in notes[0]
+
+
+def test_rename_with_a_value_change_is_a_redefinition():
+    before = (_assumption(id="A5", name="Opening height", value=30.0),)
+    after = (_assumption(
+        id="A5", name="Opening width", value=20.0, evidence="measured"),)
+    _merged, issues = cad_workflow.merge_assumptions(before, after)
+    assert any("redefined" in issue for issue in issues)
+    assert any("Opening height" in issue and "Opening width" in issue
+               for issue in issues)
+
+
+def test_rename_with_a_status_promotion_is_a_redefinition():
+    before = (_assumption(id="A5", name="Opening height", status="unverified"),)
+    after = (_assumption(
+        id="A5", name="Slot height", status="user_confirmed",
+        evidence="user selection"),)
+    _merged, issues = cad_workflow.merge_assumptions(before, after)
+    assert any("redefined" in issue for issue in issues)
+
+
+def test_value_change_without_evidence_still_blocks():
+    before = (_assumption(id="A5", value=30.0),)
+    after = (_assumption(id="A5", value=25.0, evidence=""),)
+    _merged, issues = cad_workflow.merge_assumptions(before, after)
+    assert any("changed without evidence" in issue for issue in issues)
+
+
+def test_unchanged_rows_produce_no_relabel_notes():
+    rows = (_assumption(id="A5"),)
+    assert cad_workflow.relabelled_assumptions(rows, rows) == []
