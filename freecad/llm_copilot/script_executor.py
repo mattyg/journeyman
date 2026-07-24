@@ -77,6 +77,16 @@ def _annotate_traceback(script, text, context=2):
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
+def _state_flags(obj):
+    """FreeCAD's object State as a list of flag names.
+
+    Real FreeCAD exposes a list; accept a bare string too so a caller passing
+    "Invalid" is not silently read character by character.
+    """
+    state = getattr(obj, "State", None) or ()
+    return [state] if isinstance(state, str) else list(state)
+
+
 def assert_feature(obj, solids=None):
     """Raise a specific error unless ``obj`` built into usable geometry.
 
@@ -86,12 +96,23 @@ def assert_feature(obj, solids=None):
 
     Pass ``solids`` to also assert an exact solid count.
     """
-    name = getattr(obj, "Name", None) or repr(obj)
     if obj is None:
         raise ValueError("assert_feature: no object (the feature was not created)")
-    errors = getattr(obj, "State", None)
-    if errors and "Invalid" in errors:
-        raise ValueError(f"{name} is in an Invalid state: {errors}")
+    name = getattr(obj, "Name", None) or repr(obj)
+    state = _state_flags(obj)
+    # 'Touched' alone only means the feature awaits a recompute — not a defect.
+    # Recompute and re-read before deciding, so a pending update is not
+    # reported as a broken feature.
+    if "Touched" in state and "Invalid" not in state:
+        document = getattr(obj, "Document", None)
+        if document is not None:
+            try:
+                document.recompute()
+            except Exception:
+                pass
+        state = _state_flags(obj)
+    if "Invalid" in state:
+        raise ValueError(f"{name} is in an Invalid state: {state}")
     shape = getattr(obj, "Shape", None)
     if shape is None or shape.isNull():
         raise ValueError(
@@ -113,9 +134,18 @@ def assert_feature(obj, solids=None):
 def assert_sketch_constrained(sketch):
     """Raise unless ``sketch`` is closed and fully constrained."""
     name = getattr(sketch, "Name", None) or repr(sketch)
+    # An empty sketch is a different problem from one whose shape failed to
+    # build, and saying "no shape" for it sends the model looking in the wrong
+    # place — it was the terminal error of a whole failed run.
+    geometry = getattr(sketch, "Geometry", None)
+    if geometry is not None and len(geometry) == 0:
+        raise ValueError(
+            f"{name} has no geometry — add geometry before constraining it")
     shape = getattr(sketch, "Shape", None)
     if shape is None or shape.isNull():
-        raise ValueError(f"{name} has no shape")
+        raise ValueError(
+            f"{name} has no shape: it has {len(geometry or ())} geometry "
+            "elements but produced no edges, so the sketch failed to build")
     if shape.Wires and not all(wire.isClosed() for wire in shape.Wires):
         raise ValueError(
             f"{name} is not a closed wire; a pad or pocket profile must close")

@@ -137,3 +137,58 @@ def test_underconstrained_sketch_is_rejected():
     sketch.solve = lambda: 3
     with pytest.raises(ValueError, match="not fully constrained"):
         assert_sketch_constrained(sketch)
+
+
+def test_empty_sketch_reports_missing_geometry_not_missing_shape():
+    """The terminal error of climbing-hanger-transcript-3.
+
+    The sketch had geoms: 0 and was reported as "has no shape", pointing the
+    model at shape construction when the real problem was an empty sketch.
+    """
+    sketch = FakeObj("Sketch_OuterProfile", FakeShape(null=True))
+    sketch.Geometry = []
+    with pytest.raises(ValueError, match="has no geometry"):
+        assert_sketch_constrained(sketch)
+
+
+def test_sketch_with_geometry_but_no_shape_says_so():
+    sketch = FakeObj("Sketch_OuterProfile", FakeShape(null=True))
+    sketch.Geometry = [object(), object()]
+    with pytest.raises(ValueError) as excinfo:
+        assert_sketch_constrained(sketch)
+    message = str(excinfo.value)
+    assert "2 geometry elements" in message
+    assert "failed to build" in message
+
+
+class FakeDoc:
+    def __init__(self, obj, clears=True):
+        self._obj, self._clears = obj, clears
+        self.recomputes = 0
+
+    def recompute(self):
+        self.recomputes += 1
+        if self._clears:
+            self._obj.State = []
+
+
+def test_touched_alone_recomputes_instead_of_failing():
+    """'Touched' means the feature awaits a recompute, not that it is broken."""
+    obj = FakeObj(shape=FakeShape(), state=["Touched"])
+    obj.Document = FakeDoc(obj)
+    assert assert_feature(obj) is obj
+    assert obj.Document.recomputes == 1
+
+
+def test_touched_that_survives_recompute_is_not_an_error():
+    obj = FakeObj(shape=FakeShape(), state=["Touched"])
+    obj.Document = FakeDoc(obj, clears=False)
+    assert assert_feature(obj) is obj
+
+
+def test_invalid_state_still_raises_without_recomputing():
+    obj = FakeObj(shape=FakeShape(), state=["Touched", "Invalid"])
+    obj.Document = FakeDoc(obj)
+    with pytest.raises(ValueError, match="Invalid state"):
+        assert_feature(obj)
+    assert obj.Document.recomputes == 0
