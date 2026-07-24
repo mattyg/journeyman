@@ -17,6 +17,8 @@ class LLMCopilotWorkbench(Gui.Workbench):
     ToolTip = "AI copilot for creating and editing CAD models"
 
     def Initialize(self):
+        from freecad.llm_copilot.deps import ensure_litellm
+        ensure_litellm()
         Gui.addCommand("LLMCopilot_TogglePanel", _TogglePanelCommand())
         self.appendToolbar("LLM Copilot", ["LLMCopilot_TogglePanel"])
         self.appendMenu("LLM Copilot", ["LLMCopilot_TogglePanel"])
