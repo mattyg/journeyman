@@ -218,3 +218,40 @@ def test_one_feature_with_its_scaffolding_is_allowed():
 def test_scripts_building_no_features_are_allowed():
     assert cad_workflow.multi_feature_issues("print(doc.Objects)") == []
     assert cad_workflow.multi_feature_issues("def (:") == []
+
+
+# --- placeholder (no-op) block lint ---
+
+def test_placeholder_loop_where_constraints_belong_is_flagged():
+    """Turn 1 of the climbing-hanger transcript: `for i in range(4): pass`."""
+    issues = cad_workflow.noop_block_issues("for i in range(4):\n    pass\n")
+    assert len(issues) == 1
+    assert "for block at line 1" in issues[0]
+
+
+def test_placeholder_constraint_loop_is_flagged():
+    """Turn 2: the constraint pairs were enumerated, then never applied."""
+    issues = cad_workflow.noop_block_issues(
+        "for a, b in [(g1, g2), (g2, g4)]:\n    pass\n")
+    assert len(issues) == 1
+
+
+def test_real_loop_bodies_are_not_flagged():
+    assert cad_workflow.noop_block_issues(
+        "for i in range(4):\n    sk.addConstraint(c)\n") == []
+    assert cad_workflow.noop_block_issues(
+        "for i, g in enumerate(sk.Geometry):\n    print(i, g)\n") == []
+
+
+def test_every_noop_block_kind_is_reported_with_its_line():
+    issues = cad_workflow.noop_block_issues(
+        "x = 1\n"
+        "if x:\n    pass\n"
+        "while x:\n    pass\n")
+    assert len(issues) == 2
+    assert any("if block at line 2" in issue for issue in issues)
+    assert any("while block at line 4" in issue for issue in issues)
+
+
+def test_unparsable_script_yields_no_noop_issues():
+    assert cad_workflow.noop_block_issues("def (:") == []

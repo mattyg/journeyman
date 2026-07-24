@@ -362,3 +362,30 @@ def multi_feature_issues(script):
     return [
         "this step builds {} features ({}); build one and verify it before "
         "the next".format(len(created), ", ".join(created))]
+
+
+def noop_block_issues(script):
+    """Flag loops and conditionals whose body does nothing.
+
+    A ``for ... : pass`` where constraints belong is a placeholder the model
+    then reasons about as though it ran — the sketch is treated as constrained
+    when nothing was added. Cheap to detect, and the failure is otherwise
+    invisible until the geometry is wrong.
+    """
+    import ast
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return []
+    issues = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.For, ast.While, ast.If, ast.With)):
+            continue
+        body = node.body
+        if not body or not all(isinstance(item, ast.Pass) for item in body):
+            continue
+        kind = type(node).__name__.lower()
+        issues.append(
+            f"the {kind} block at line {node.lineno} does nothing; write the "
+            "statements it should contain or remove it")
+    return issues

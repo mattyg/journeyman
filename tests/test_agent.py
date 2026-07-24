@@ -1317,3 +1317,32 @@ def test_one_feature_gate_is_off_by_default():
             on_tool_result=lambda tool, summary, content: shown.append(content))
     assert out == "Done"
     assert not [t for t in shown if t.startswith("[one feature per step]")]
+
+
+def test_placeholder_block_is_rejected_before_execution():
+    """The transcript submitted `for i in range(4): pass` where constraints
+    belonged, then reasoned as though the sketch were constrained."""
+    placeholder = (
+        "sk.addGeometry(Part.LineSegment(a, b), False)\n"
+        "for i in range(4):\n"
+        "    pass\n")
+    real = "sk.addGeometry(Part.LineSegment(a, b), False)\n"
+    client = FakeClient([
+        LLMProposal("sketch the plate", placeholder, "", True),
+        LLMProposal("sketch the plate", real, "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    shown = []
+    agent = _agent(
+        client, executor, _settings(auto_approve_loop=True))
+    out = agent.send(
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    asks = [t for t in shown if t.startswith("[placeholder code]")]
+    assert len(asks) == 1
+    assert "for block at line 2" in asks[0]
+    assert asks[0] in [
+        m["content"] for m in agent.messages if m["role"] == "user"]
+    assert not executor.results, "the placeholder script never ran"

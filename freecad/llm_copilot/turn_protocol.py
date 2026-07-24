@@ -124,6 +124,15 @@ def fidelity_required(issues):
         "omission approval.")
 
 
+def placeholder_code(issues):
+    """The script contains blocks that do nothing where work was intended."""
+    return _gate(
+        "placeholder code", issues,
+        "Do not submit inert scaffolding: a block that does nothing will be "
+        "reasoned about later as though it ran. The document has not been "
+        "edited.")
+
+
 def one_feature_required(issues):
     """The script builds several features, defeating per-feature verification."""
     return _gate(

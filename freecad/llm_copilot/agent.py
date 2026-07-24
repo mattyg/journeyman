@@ -70,6 +70,7 @@ class _Turn:
         # that declines to supply a ledger meets the normal gate, not a loop.
         self.ledger_first_requested = False
         self.multi_feature_retries = 0
+        self.noop_retries = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -473,6 +474,25 @@ class Agent:
                 if signal is LOOP:
                     continue
                 return signal
+
+            # Applies to every script, diagnostics included: an inert block is
+            # never intentional, and its absence is invisible downstream.
+            noop_issues = cad_workflow.noop_block_issues(proposal.script)
+            if noop_issues:
+                turn.noop_retries += 1
+                if turn.noop_retries > max(
+                        1, self.settings.self_correction_attempts):
+                    summary = (
+                        "I couldn't get a script without placeholder blocks: "
+                        + "; ".join(noop_issues) + ".")
+                    self.messages.append(
+                        {"role": "assistant", "content": summary})
+                    return summary
+                self._reject(
+                    turn_protocol.placeholder_code(noop_issues),
+                    proposal, on_tool_result)
+                continue
+            turn.noop_retries = 0
 
             # A script that only reads the document is diagnosis, not
             # construction: the planning gates have nothing to check, and
