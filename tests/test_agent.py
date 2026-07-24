@@ -1,7 +1,7 @@
 # tests/test_agent.py
 import threading
 
-from freecad.llm_copilot.agent import Agent
+from freecad.llm_copilot.agent import Agent, _model_history
 from freecad.llm_copilot.agent import AgentCancelled
 from freecad.llm_copilot.types import ExecResult
 from freecad.llm_copilot.llm_client import LLMProposal
@@ -407,10 +407,12 @@ def test_unchanged_step_does_not_resend_snapshot_or_images():
         settings=_settings(rendered_views=True, auto_approve_loop=True),
         view_capture=lambda *args: captures.append(args) or [])
     agent.send("measure", lambda i: True, lambda r, s, i, p: None)
-    feedback = client.calls[-1][-1]["content"]
+    feedback = client.calls[-1][-2]["content"]
     assert "[document unchanged]" in feedback
     assert "[new snapshot]" not in feedback
     assert "LARGE SNAPSHOT" not in feedback
+    assert client.calls[-1][-1]["content"] == (
+        "[current document]\nLARGE SNAPSHOT")
     assert captures == []
 
 
@@ -425,10 +427,31 @@ def test_context_callback_receives_only_new_messages_for_each_call():
         "box", lambda i: True, lambda r, s, i, p: None,
         on_context=lambda messages: batches.append(list(messages)))
     assert len(batches) == 2
-    assert len(batches[0]) == 1
+    assert len(batches[0]) == 2
     assert "[request]\nbox" in batches[0][0]["content"]
+    assert batches[0][1]["content"].startswith("[current document]\n")
     assert any("[executed OK]" in message["content"]
                for message in batches[1])
+    assert batches[1][-1]["content"].startswith("[current document]\n")
+
+
+def test_legacy_history_drops_superseded_snapshots_ledgers_and_scripts():
+    messages = [
+        {"role": "user", "content": (
+            "[document snapshot]\nOLD\n\n[request]\nmake it")},
+        {"role": "assistant", "content": (
+            "(intent) create\n(script)\nSECRET SOURCE")},
+        {"role": "user", "content": (
+            "[executed OK]\n[document diff]\nCreated: Box\n"
+            "[new snapshot]\nOLD FULL STATE\n"
+            "[design ledger]\nOLD PLAN")},
+    ]
+    compact = _model_history(messages)
+    text = str(compact)
+    assert "[request]\\nmake it" in text
+    assert "OLD FULL STATE" not in text
+    assert "OLD PLAN" not in text
+    assert "SECRET SOURCE" not in text
 
 
 def test_structured_plan_is_required_before_execution_and_ledger_is_sent():

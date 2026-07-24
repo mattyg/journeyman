@@ -47,12 +47,15 @@ def document_state(app, rich=True):
     """Return stable structured state suitable for diffs and model inspection."""
     doc = getattr(app, "ActiveDocument", None)
     if doc is None:
-        return {"document": None, "objects": {}}
+        return {"document": None, "selection": [], "objects": {}}
     objects = {}
     for obj in doc.Objects:
         if is_internal_object(obj):
             continue
         item = {"type": obj.TypeId, "label": obj.Label}
+        origin_features = _origin_plane_names(obj)
+        if origin_features:
+            item["origin_features"] = origin_features
         shape = getattr(obj, "Shape", None)
         if shape is not None:
             try:
@@ -93,7 +96,11 @@ def document_state(app, rich=True):
             if state:
                 item["state"] = state
         objects[obj.Name] = item
-    return {"document": doc.Name, "objects": objects}
+    return {
+        "document": doc.Name,
+        "selection": _selection_names(),
+        "objects": objects,
+    }
 
 
 class DocumentDelta:
@@ -141,20 +148,29 @@ class DocumentDelta:
         """Human/model-readable created/deleted/modified summary."""
         lines = []
         for name in self.created:
+            item = self.new[name]
             lines.append(
-                "Created: " + name + " " + json.dumps(self.new[name], sort_keys=True))
+                "Created: " + name + " (" + item.get("type", "unknown type")
+                + ")")
         for name in self.deleted:
             lines.append(
-                "Deleted: " + name + " " + json.dumps(self.old[name], sort_keys=True))
+                "Deleted: " + name + " ("
+                + self.old[name].get("type", "unknown type") + ")")
         for name in self.modified:
             changes = []
             for key in sorted(set(self.old[name]) | set(self.new[name])):
                 if self.old[name].get(key) != self.new[name].get(key):
-                    changes.append(
-                        f"{key}: {self.old[name].get(key)!r} -> "
-                        f"{self.new[name].get(key)!r}")
+                    if key == "properties":
+                        before_props = self.old[name].get(key, {})
+                        after_props = self.new[name].get(key, {})
+                        for prop in sorted(set(before_props) | set(after_props)):
+                            if before_props.get(prop) != after_props.get(prop):
+                                changes.append(prop)
+                    else:
+                        changes.append(key)
             if changes:
-                lines.append("Modified: " + name + "\n  " + "\n  ".join(changes))
+                lines.append(
+                    "Modified: " + name + " (" + ", ".join(changes) + ")")
         return "\n".join(lines) or "No observable document changes."
 
 
@@ -220,8 +236,24 @@ def validate(app, names=None):
 
 
 def inspect(app, query=""):
+    state = document_state(app, rich=True)
+    if query:
+        objects = state["objects"]
+        selected = {
+            name for name in objects
+            if name.lower() in query.lower()}
+        related = set(selected)
+        for name in selected:
+            item = objects[name]
+            related.update(item.get("depends_on", ()))
+            related.update(item.get("used_by", ()))
+        if selected:
+            state = dict(state)
+            state["objects"] = {
+                name: objects[name] for name in sorted(related)
+                if name in objects}
     return (f"Query: {query}\n" if query else "") + json.dumps(
-        document_state(app, rich=True), indent=2, sort_keys=True)
+        state, indent=2, sort_keys=True)
 
 
 def snapshot(app, rich=False) -> str:
@@ -230,6 +262,11 @@ def snapshot(app, rich=False) -> str:
         return ("NO_ACTIVE_DOCUMENT\n"
                 "There is no active document. The user must create or open one "
                 "before using the copilot.")
+    if rich:
+        return (
+            "[rich state]\n"
+            + json.dumps(document_state(app, rich=True),
+                         separators=(",", ":"), sort_keys=True))
     lines = [f"Document: {doc.Name}"]
     if not doc.Objects:
         lines.append("(empty — no objects yet)")
@@ -250,8 +287,4 @@ def snapshot(app, rich=False) -> str:
     sel = _selection_names()
     if sel:
         lines.append(f"Selected: {', '.join(sel)}")
-    if rich:
-        lines.append("[rich state]")
-        lines.append(json.dumps(document_state(app, rich=True),
-                                indent=2, sort_keys=True))
     return "\n".join(lines)

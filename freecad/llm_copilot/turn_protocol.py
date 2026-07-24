@@ -14,9 +14,17 @@ pinned with golden tests. The functions are pure: no FreeCAD, no Qt, no client.
 from . import cad_workflow, document_inspector
 
 
-def request(snapshot, user_message):
-    """The user's turn, prefixed with the current document snapshot."""
-    return f"[document snapshot]\n{snapshot}\n\n[request]\n{user_message}"
+def request(user_message):
+    """A durable user request; current document state is injected separately."""
+    return f"[request]\n{user_message}"
+
+
+def current_context(snapshot, ledger, settings):
+    """Replaceable working state injected for one model call, not persisted."""
+    text = "[current document]\n" + snapshot
+    if settings.design_ledger_context:
+        text += "\n\n" + cad_workflow.ledger_text(ledger)
+    return text
 
 
 def inspection_result(inspected, *, verify_stage=False):
@@ -61,8 +69,7 @@ def _diagnostics(result):
     return text
 
 
-def execution_body(result, before, after, new_snapshot, changed_names,
-                   settings):
+def execution_body(result, before, after, changed_names, settings):
     """The leading feedback for a successful step: status, diagnostics, diff.
 
     Stops short of the CAD-workflow warnings and design ledger, which depend on
@@ -73,13 +80,15 @@ def execution_body(result, before, after, new_snapshot, changed_names,
     if changed_names:
         validation = getattr(result, "validation", "")
         if settings.enhanced_validation:
-            feedback += f"[validation]\n{validation}\n"
+            feedback += (
+                "[validation]\npassed for changed objects"
+                + ("" if validation else " (no shape summary)")
+                + "\n")
         if settings.structured_diff:
             feedback += (
                 "[document diff]\n"
                 + document_inspector.structured_diff(before, after)
                 + "\n")
-        feedback += f"[new snapshot]\n{new_snapshot}"
     else:
         feedback += "[document unchanged]\n"
     return feedback
@@ -103,8 +112,6 @@ def workflow_tail(workflow_warnings, ledger, settings):
             + "\n".join("- " + warning for warning in workflow_warnings)
             + "\nResolve these warnings or explicitly verify why "
             "the current construction is intentional.\n")
-    if settings.design_ledger_context:
-        tail += "\n" + cad_workflow.ledger_text(ledger) + "\n"
     return tail
 
 

@@ -99,9 +99,7 @@ _SKETCH_PROMPT = (
     "practical; explain any deliberately free construction geometry.\n")
 
 _STAGE_PROMPT = (
-    "- Set strategy, stage, plan, plan_step, and success_criteria on every "
-    "script call. plan_step is the one-based plan item advanced by that script. "
-    "Normally progress analyze → sketch → additive → subtractive → finish → "
+    "- Normally progress analyze → sketch → additive → subtractive → finish → "
     "verify; skip stages that do not apply, and return to an earlier stage when "
     "a correction requires it. Fillets/chamfers generally come last.\n")
 

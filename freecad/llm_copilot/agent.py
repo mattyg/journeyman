@@ -13,6 +13,30 @@ LOOP = ("loop",)
 EXECUTE = ("execute",)
 
 
+def _model_history(messages):
+    """Compact superseded state from histories written by older versions."""
+    compact = []
+    for index, message in enumerate(messages):
+        item = dict(message)
+        content = item.get("content")
+        if isinstance(content, str):
+            if content.startswith("[document snapshot]\n"):
+                marker = "\n\n[request]\n"
+                if marker in content:
+                    content = "[request]\n" + content.split(marker, 1)[1]
+            for marker in ("\n[new snapshot]\n", "\n[design ledger]\n"):
+                if marker in content:
+                    content = content.split(marker, 1)[0].rstrip() + "\n"
+            if ("\n(script)\n" in content and index + 1 < len(messages)
+                    and str(messages[index + 1].get("content", "")).startswith(
+                        "[executed OK]")):
+                content = content.split("\n(script)\n", 1)[0].replace(
+                    "(intent)", "(executed intent)", 1)
+            item["content"] = content
+        compact.append(item)
+    return compact
+
+
 class _Turn:
     """Mutable per-turn state threaded through the proposal handlers.
 
@@ -257,7 +281,8 @@ class Agent:
         include_system_context = context_cursor == 0
         check_cancelled()
         snap = self.access.snapshot()
-        request_text = turn_protocol.request(snap, user_message)
+        current_snapshot = snap
+        request_text = turn_protocol.request(user_message)
         if user_images:
             content = [{"type": "text", "text": request_text}]
             for image in user_images:
@@ -285,11 +310,22 @@ class Agent:
                             "content": prompt_reader(self.settings),
                         })
                     include_system_context = False
+                context_messages.append({
+                    "role": "user",
+                    "content": turn_protocol.current_context(
+                        current_snapshot, ledger, self.settings),
+                })
                 on_context(context_messages)
                 context_cursor = len(self.messages)
             check_cancelled()
             try:
-                proposal = self.client.complete(self.messages, self.settings)
+                model_messages = _model_history(self.messages)
+                model_messages.append({
+                    "role": "user",
+                    "content": turn_protocol.current_context(
+                        current_snapshot, ledger, self.settings),
+                })
+                proposal = self.client.complete(model_messages, self.settings)
             except LLMTimeoutError as exc:
                 if on_timeout is not None and on_timeout(str(exc)):
                     check_cancelled()
@@ -484,6 +520,7 @@ class Agent:
                 workflow_line = (
                     f"\n(strategy) {proposal.strategy or 'unspecified'}"
                     f"\n(stage) {proposal.stage or 'unspecified'}")
+            intent_message_index = len(self.messages)
             self.messages.append(
                 {"role": "assistant",
                  "content": (
@@ -521,6 +558,7 @@ class Agent:
                 result = self.executor.run(self.app, proposal.script)
             after = self.access.state()
             new_snap = self.access.snapshot()
+            current_snapshot = new_snap
             on_result(result, new_snap, proposal.intent, proposal.script)
             # If cancellation arrived while Python was already executing, the
             # script cannot be interrupted safely. Report its actual result,
@@ -534,8 +572,7 @@ class Agent:
                 from .view_capture import changed_object_names
                 changed_names = changed_object_names(before, after)
                 feedback = turn_protocol.execution_body(
-                    result, before, after, new_snap, changed_names,
-                    self.settings)
+                    result, before, after, changed_names, self.settings)
                 workflow_warnings = turn_protocol.review_step(
                     before, after, proposal, self.settings)
                 if proposal.stage:
@@ -552,6 +589,10 @@ class Agent:
                     "role": "user",
                     "content": feedback,
                 })
+                # Keep the durable event but discard successful script source;
+                # the current document and diff are authoritative thereafter.
+                self.messages[intent_message_index]["content"] = (
+                    f"(executed intent) {proposal.intent}{workflow_line}")
                 if (changed_names and self.settings.rendered_views
                         and self.view_capture):
                     try:

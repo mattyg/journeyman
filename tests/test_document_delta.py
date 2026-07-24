@@ -41,6 +41,20 @@ def test_structured_reports_no_changes():
         "No observable document changes.")
 
 
+def test_structured_diff_names_changed_fields_without_repeating_values():
+    before = _state({"Pad": {
+        "type": "PartDesign::Pad",
+        "properties": {"Length": 10, "ReferenceAxis": "very long old value"},
+    }})
+    after = _state({"Pad": {
+        "type": "PartDesign::Pad",
+        "properties": {"Length": 20, "ReferenceAxis": "very long new value"},
+    }})
+    text = structured_diff(before, after)
+    assert text == "Modified: Pad (Length, ReferenceAxis)"
+    assert "very long" not in text
+
+
 def test_structured_labels_each_change_kind():
     before = _state({"A": {"x": 1}, "D": {"gone": True}})
     after = _state({"A": {"x": 2}, "N": {"new": True}})
