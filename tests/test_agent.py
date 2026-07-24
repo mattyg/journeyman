@@ -1574,3 +1574,64 @@ def test_redefined_ledger_row_is_still_reported():
             "model it", lambda _intent: True, lambda _r, _s, _i, _p: None)
     assert out == "Done"
     assert any("redefined" in str(call) for call in client.calls)
+
+
+def test_rate_limit_offers_a_retry_and_continues():
+    """Automatic backoff is spent by now; waiting is all that helps."""
+    from freecad.llm_copilot.llm_client import LLMRateLimitError
+
+    class RateLimitedOnce(FakeClient):
+        def __init__(self, proposals):
+            super().__init__(proposals)
+            self.raised = False
+
+        def complete(self, messages, settings):
+            if not self.raised:
+                self.raised = True
+                raise LLMRateLimitError("HTTP 429", status=429, retry_after=12)
+            return super().complete(messages, settings)
+
+    client = RateLimitedOnce([
+        LLMProposal("build", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    prompts = []
+    out = _agent(client, FakeExecutor([ExecResult(True, "", "")]),
+                 _settings(auto_approve_loop=True)).send(
+        "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_timeout=lambda message: prompts.append(message) or True)
+    assert out == "Done"
+    assert len(prompts) == 1
+    assert "rate limiting or overloaded" in prompts[0]
+    assert "12s" in prompts[0]
+
+
+def test_declined_rate_limit_retry_preserves_context():
+    from freecad.llm_copilot.llm_client import LLMRateLimitError
+
+    class AlwaysLimited(FakeClient):
+        def complete(self, messages, settings):
+            raise LLMRateLimitError("HTTP 429", status=429)
+
+    agent = _agent(
+        AlwaysLimited([]), FakeExecutor([]), _settings(auto_approve_loop=True))
+    out = agent.send(
+        "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_timeout=lambda _message: False)
+    assert "rate limited or overloaded" in out
+    assert "work already completed is saved" in out
+    # The user's request survives for a later retry.
+    assert any("make it" in str(m.get("content", "")) for m in agent.messages)
+
+
+def test_rate_limit_without_a_handler_does_not_crash_the_turn():
+    from freecad.llm_copilot.llm_client import LLMRateLimitError
+
+    class AlwaysLimited(FakeClient):
+        def complete(self, messages, settings):
+            raise LLMRateLimitError("HTTP 429", status=429)
+
+    out = _agent(
+        AlwaysLimited([]), FakeExecutor([]), _settings()).send(
+            "make it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+    assert "rate limited or overloaded" in out

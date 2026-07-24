@@ -1,4 +1,9 @@
 import json
+
+import pytest
+
+import urllib.error
+
 import freecad.llm_copilot.llm_client as lc
 from freecad.llm_copilot.settings import Settings
 
@@ -573,3 +578,127 @@ def test_http_error_becomes_llmerror(monkeypatch):
         assert "401" in str(e)
     else:
         raise AssertionError("expected LLMError")
+
+
+# --- transient HTTP failures (rate limiting, overload) ---
+
+
+class _FakeHTTPError(urllib.error.HTTPError):
+    def __init__(self, code, body="{}", retry_after=None):
+        headers = {"Retry-After": retry_after} if retry_after else {}
+        super().__init__(
+            "https://x/v1", code, "err", headers, None)
+        self._body = body.encode("utf-8")
+
+    def read(self):
+        return self._body
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = json.dumps(payload).encode("utf-8")
+
+    def read(self):
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _patch_urlopen(monkeypatch, outcomes, sleeps):
+    """Drive _http_post_json's real retry loop with a scripted urlopen."""
+    remaining = list(outcomes)
+
+    def fake_urlopen(_req, timeout=None):
+        outcome = remaining.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _FakeResponse(outcome)
+
+    monkeypatch.setattr(lc.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(lc, "_sleep", lambda s, c=None: sleeps.append(s) or True)
+    return remaining
+
+
+def test_rate_limit_is_retried_and_succeeds(monkeypatch):
+    sleeps = []
+    _patch_urlopen(
+        monkeypatch, [_FakeHTTPError(429), {"ok": True}], sleeps)
+    assert lc._http_post_json("https://x/v1", {}, {}) == {"ok": True}
+    assert len(sleeps) == 1, "one backoff between the two attempts"
+
+
+def test_retry_after_header_is_honoured(monkeypatch):
+    sleeps = []
+    _patch_urlopen(
+        monkeypatch,
+        [_FakeHTTPError(429, retry_after="7"), {"ok": True}], sleeps)
+    lc._http_post_json("https://x/v1", {}, {})
+    assert sleeps == [7.0]
+
+
+def test_overload_statuses_are_retried(monkeypatch):
+    for status in (500, 502, 503, 504):
+        sleeps = []
+        _patch_urlopen(
+            monkeypatch, [_FakeHTTPError(status), {"ok": True}], sleeps)
+        assert lc._http_post_json("https://x/v1", {}, {}) == {"ok": True}, status
+
+
+def test_exhausted_retries_raise_a_rate_limit_error(monkeypatch):
+    sleeps = []
+    _patch_urlopen(
+        monkeypatch, [_FakeHTTPError(429)] * lc.MAX_HTTP_ATTEMPTS, sleeps)
+    with pytest.raises(lc.LLMRateLimitError) as excinfo:
+        lc._http_post_json("https://x/v1", {}, {})
+    assert excinfo.value.status == 429
+    assert len(sleeps) == lc.MAX_HTTP_ATTEMPTS - 1
+
+
+def test_auth_errors_are_not_retried(monkeypatch):
+    sleeps = []
+    remaining = _patch_urlopen(
+        monkeypatch, [_FakeHTTPError(401, '{"error":"bad key"}')], sleeps)
+    with pytest.raises(lc.LLMError) as excinfo:
+        lc._http_post_json("https://x/v1", {}, {})
+    assert not isinstance(excinfo.value, lc.LLMRateLimitError)
+    assert "bad key" in str(excinfo.value)
+    assert sleeps == [], "a bad key is not fixed by waiting"
+    assert remaining == []
+
+
+def test_cancellation_during_backoff_stops_retrying(monkeypatch):
+    monkeypatch.setattr(
+        lc.urllib.request, "urlopen",
+        lambda _req, timeout=None: (_ for _ in ()).throw(_FakeHTTPError(429)))
+    monkeypatch.setattr(lc, "_sleep", lambda s, c=None: False)
+    with pytest.raises(lc.LLMRateLimitError):
+        lc._http_post_json("https://x/v1", {}, {})
+
+
+def test_total_wait_is_bounded(monkeypatch):
+    sleeps = []
+    _patch_urlopen(
+        monkeypatch,
+        [_FakeHTTPError(429, retry_after="45")] * lc.MAX_HTTP_ATTEMPTS, sleeps)
+    with pytest.raises(lc.LLMRateLimitError):
+        lc._http_post_json("https://x/v1", {}, {})
+    assert sum(sleeps) <= lc.MAX_TOTAL_RETRY_WAIT
+    for delay in sleeps:
+        assert delay <= lc.MAX_RETRY_WAIT
+
+
+def test_backoff_grows_and_stays_within_bounds():
+    for attempt in range(1, 6):
+        delay = lc._backoff_delay(attempt)
+        assert 0 < delay <= lc.MAX_RETRY_WAIT
+    assert lc._backoff_delay(1, retry_after=3) == 3
+    assert lc._backoff_delay(1, retry_after=999) == lc.MAX_RETRY_WAIT
+
+
+def test_unparsable_retry_after_falls_back_to_backoff():
+    err = _FakeHTTPError(429, retry_after="Wed, 21 Oct 2026 07:28:00 GMT")
+    assert lc._retry_after_seconds(err) is None

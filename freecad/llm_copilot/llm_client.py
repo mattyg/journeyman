@@ -13,7 +13,9 @@ The provider prefix is stripped before the model name is sent on the wire.
 
 import json
 import copy
+import random
 import socket
+import time
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -469,6 +471,17 @@ _ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
 MODELS_TIMEOUT = 15
 COMPLETION_TIMEOUT = 300
 
+# Transient HTTP failures worth retrying: rate limiting, and the gateway/
+# overload family providers return under load. Anything else (401, 400) is a
+# configuration or payload problem that retrying cannot fix.
+RETRYABLE_STATUS = frozenset((429, 500, 502, 503, 504))
+MAX_HTTP_ATTEMPTS = 3
+# Bound on any single backoff wait, and on the total spent waiting across
+# attempts. A long CAD run makes many sequential calls, so a rate limit must
+# not turn into an unbounded stall.
+MAX_RETRY_WAIT = 30.0
+MAX_TOTAL_RETRY_WAIT = 60.0
+
 
 @dataclass
 class LLMProposal:
@@ -520,6 +533,20 @@ class LLMTimeoutError(LLMError):
     """Raised when a completion exceeds the provider request timeout."""
 
 
+class LLMRateLimitError(LLMError):
+    """Raised when the provider rate limited or was overloaded.
+
+    Distinguished from a generic :class:`LLMError` so the agent can offer the
+    same "retry?" path it offers on a timeout: waiting fixes this, whereas a
+    bad key or a malformed payload never will.
+    """
+
+    def __init__(self, message, status=429, retry_after=None):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
+
+
 # Optional diagnostic sink. The GUI sets this to route trace lines to the
 # FreeCAD console; kept as a plain callable so this module needs no FreeCAD
 # import. No-op by default.
@@ -535,37 +562,107 @@ def _debug(msg: str) -> None:
             pass
 
 
+def _retry_after_seconds(exc):
+    """Seconds the provider asked us to wait, if it said so.
+
+    ``Retry-After`` is either a delay in seconds or an HTTP date; only the
+    numeric form is honoured, since the date form needs clock agreement we
+    cannot assume. Returns ``None`` when absent or unparsable.
+    """
+    headers = getattr(exc, "headers", None)
+    raw = headers.get("Retry-After") if headers is not None else None
+    if raw is None:
+        return None
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, value) if value == value else None  # reject NaN
+
+
+def _backoff_delay(attempt, retry_after=None):
+    """How long to wait before ``attempt`` (1-based), clamped to a sane bound."""
+    if retry_after is not None:
+        return min(retry_after, MAX_RETRY_WAIT)
+    # Exponential with jitter, so several documents retrying do not synchronise.
+    base = min(2.0 ** (attempt - 1), MAX_RETRY_WAIT)
+    return min(base + random.uniform(0, 0.5 * base), MAX_RETRY_WAIT)
+
+
+def _sleep(seconds, cancel_event=None):
+    """Wait, but stay responsive to cancellation.
+
+    A urllib request already cannot be killed from another thread; sleeping
+    through a backoff would extend that window, so the wait is sliced and
+    checked. Returns False when cancelled mid-wait.
+    """
+    if cancel_event is not None and hasattr(cancel_event, "wait"):
+        return not cancel_event.wait(seconds)
+    remaining = seconds
+    while remaining > 0:
+        if cancel_event is not None and cancel_event.is_set():
+            return False
+        slice_ = min(0.25, remaining)
+        time.sleep(slice_)
+        remaining -= slice_
+    return True
+
+
 def _http_post_json(url: str, headers: dict, payload: dict,
-                    timeout: float = COMPLETION_TIMEOUT) -> dict:
+                    timeout: float = COMPLETION_TIMEOUT,
+                    cancel_event=None) -> dict:
     """POST a JSON body and parse a JSON response, using only the stdlib.
+
+    Retries transient failures (rate limiting, gateway/overload errors) with
+    backoff, honouring ``Retry-After`` when the provider sends it. A long CAD
+    run makes many sequential calls, so a single 429 must not end the turn.
 
     Isolated so tests can monkeypatch a single seam instead of the network.
     """
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    req.add_header("Content-Type", "application/json")
-    for key, value in headers.items():
-        req.add_header(key, value)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = resp.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = ""
+    waited = 0.0
+    for attempt in range(1, MAX_HTTP_ATTEMPTS + 1):
+        req = urllib.request.Request(url, data=data, method="POST")
+        req.add_header("Content-Type", "application/json")
+        for key, value in headers.items():
+            req.add_header(key, value)
         try:
-            detail = exc.read().decode("utf-8")
-        except Exception:
-            pass
-        raise LLMError(f"HTTP {exc.code} from {url}: {detail}") from exc
-    except socket.timeout as exc:
-        raise LLMTimeoutError(
-            f"Timed out after {timeout}s contacting {url}") from exc
-    except urllib.error.URLError as exc:
-        reason = getattr(exc, "reason", exc)
-        if isinstance(reason, socket.timeout):
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = exc.read().decode("utf-8")
+            except Exception:
+                pass
+            if exc.code not in RETRYABLE_STATUS:
+                raise LLMError(
+                    f"HTTP {exc.code} from {url}: {detail}") from exc
+            retry_after = _retry_after_seconds(exc)
+            last = LLMRateLimitError(
+                f"HTTP {exc.code} from {url}: {detail}",
+                status=exc.code, retry_after=retry_after)
+            if attempt == MAX_HTTP_ATTEMPTS:
+                raise last from exc
+            delay = _backoff_delay(attempt, retry_after)
+            if waited + delay > MAX_TOTAL_RETRY_WAIT:
+                raise last from exc
+            _debug(
+                f"HTTP {exc.code} from {url}; retrying in {delay:.1f}s "
+                f"(attempt {attempt + 1} of {MAX_HTTP_ATTEMPTS})")
+            if not _sleep(delay, cancel_event):
+                raise last from exc
+            waited += delay
+        except socket.timeout as exc:
             raise LLMTimeoutError(
                 f"Timed out after {timeout}s contacting {url}") from exc
-        raise LLMError(f"Could not reach {url}: {reason}") from exc
-    return json.loads(body)
+        except urllib.error.URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            if isinstance(reason, socket.timeout):
+                raise LLMTimeoutError(
+                    f"Timed out after {timeout}s contacting {url}") from exc
+            raise LLMError(f"Could not reach {url}: {reason}") from exc
+    raise LLMError(f"Could not reach {url}")  # unreachable; loop always exits
 
 
 def _http_get_json(url: str, headers: dict,

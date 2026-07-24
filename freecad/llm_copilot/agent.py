@@ -535,7 +535,7 @@ class Agent:
              on_question=None, on_timeout=None, on_tool=None,
              on_tool_result=None) -> str:
         from . import cad_workflow, turn_protocol
-        from .llm_client import LLMTimeoutError
+        from .llm_client import LLMRateLimitError, LLMTimeoutError
 
         def check_cancelled():
             if cancel_event is not None and cancel_event.is_set():
@@ -600,6 +600,28 @@ class Agent:
                 note = (
                     "Stopped after the model request timed out. Your request "
                     "and conversation context have been preserved.")
+                self.messages.append(
+                    {"role": "assistant", "content": note})
+                return note
+            except LLMRateLimitError as exc:
+                # Automatic backoff is already spent by the time this arrives.
+                # Waiting longer is the only thing that helps, so offer the
+                # same retry the user gets on a timeout rather than failing
+                # with a raw HTTP error.
+                wait = getattr(exc, "retry_after", None)
+                prompt = (
+                    "The provider is rate limiting or overloaded"
+                    + (f"; it asked for {wait:.0f}s." if wait else ".")
+                    + " Retry?")
+                if on_timeout is not None and on_timeout(prompt):
+                    check_cancelled()
+                    continue
+                check_cancelled()
+                note = (
+                    "Stopped: the model provider is rate limited or "
+                    "overloaded. Any work already completed is saved, and "
+                    "your conversation context has been preserved — try again "
+                    "shortly.")
                 self.messages.append(
                     {"role": "assistant", "content": note})
                 return note
