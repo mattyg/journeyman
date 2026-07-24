@@ -112,8 +112,9 @@ _STAGE_PROMPT = (
 
 _ASSUMPTION_PROMPT = (
     "- On the first script call, list every numeric value not supplied by the "
-    "user in assumptions. Use stable ids, numeric values and units; sort rows "
-    "by consequence high to low. Low-confidence, high-consequence assumptions "
+    "user in assumptions. Use stable ids, numeric values and units; row order "
+    "does not matter (the host sorts most-severe first). Low-confidence, "
+    "high-consequence assumptions "
     "must be resolved with ask_user before execution. Use at most three "
     "single-question calls with numeric choices in option labels, then resubmit "
     "the script with the same ids and user_confirmed status/evidence.\n")

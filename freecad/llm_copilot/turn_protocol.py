@@ -77,11 +77,38 @@ def structured_plan_required(issues):
         "document.")
 
 
-def assumption_ledger_required(issues):
+def _received_ledger(rows):
+    """Echo the ledger as received, so a complaint about it is self-locating.
+
+    A rejection naming a defect without showing the offending data forces the
+    model to guess at what arrived — the same failure as a traceback that gives
+    a line number but not the line.
+    """
+    if not rows:
+        return ""
+    lines = ["Ledger received:"]
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            lines.append(f"  {index}. {row!r}")
+            continue
+        lines.append(
+            "  {}. {} = {} {} (confidence={}, consequence={}, status={})".format(
+                index,
+                row.get("id") or "<no id>",
+                row.get("value"),
+                row.get("unit") or "",
+                row.get("confidence"),
+                row.get("consequence"),
+                row.get("status")).rstrip())
+    return "\n".join(lines) + "\n"
+
+
+def assumption_ledger_required(issues, rows=()):
     """The first script's assumption ledger is missing or invalid."""
     return _gate(
         "assumption ledger required", issues,
-        "Resubmit the script with a corrected ledger; the document has not "
+        _received_ledger(rows)
+        + "Resubmit the script with a corrected ledger; the document has not "
         "been edited.")
 
 
@@ -108,11 +135,12 @@ def assumption_clarification_limit():
         "the script with the user selections incorporated.")
 
 
-def invalid_assumption_update(issues):
+def invalid_assumption_update(issues, rows=()):
     """A later ledger update dropped rows or promoted them without evidence."""
     return _gate(
         "invalid assumption update", issues,
-        "Keep stable ids and provide evidence for changed values or statuses.")
+        _received_ledger(rows)
+        + "Keep stable ids and provide evidence for changed values or statuses.")
 
 
 def fidelity_required(issues):

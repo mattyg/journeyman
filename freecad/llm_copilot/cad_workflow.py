@@ -33,7 +33,6 @@ def assumption_ledger_missing(proposal, turn_state):
         return ["provide an assumption ledger (use [] when none are needed)"]
     issues = []
     seen = set()
-    previous_rank = -1
     for index, row in enumerate(rows, 1):
         prefix = f"assumption {index}"
         if not isinstance(row, dict):
@@ -58,11 +57,10 @@ def assumption_ledger_missing(proposal, turn_state):
             issues.append(prefix + " has invalid confidence")
         if consequence not in LEVELS:
             issues.append(prefix + " has invalid consequence")
-        else:
-            rank = LEVELS.index(consequence)
-            if rank < previous_rank:
-                issues.append("assumptions must be sorted high to low consequence")
-            previous_rank = rank
+        # Row order is presentation, not content: the harness wants severe
+        # assumptions read first, which the agent can arrange itself. Rejecting
+        # a whole step over it discards working geometry and, because the
+        # complaint named no row, deadlocked. See sort_assumptions.
         if status not in STATUSES:
             issues.append(prefix + " has invalid status")
         if "evidence" not in row:
@@ -71,6 +69,20 @@ def assumption_ledger_missing(proposal, turn_state):
                 row.get("evidence", "")).strip():
             issues.append(prefix + " needs evidence for its status")
     return issues
+
+
+def sort_assumptions(rows):
+    """Order rows most-severe first, so the ledger reads by consequence.
+
+    Stable, so rows of equal consequence keep the order the model chose. Rows
+    with an invalid consequence sort last and are caught by validation.
+    """
+    def rank(row):
+        consequence = row.get("consequence") if isinstance(row, dict) else None
+        return (LEVELS.index(consequence)
+                if consequence in LEVELS else len(LEVELS))
+
+    return tuple(sorted(rows, key=rank))
 
 
 def blocking_assumptions(assumptions):
@@ -82,9 +94,13 @@ def blocking_assumptions(assumptions):
 
 
 def merge_assumptions(previous, proposed):
-    """Merge rows while preventing silent deletion or unsupported promotion."""
+    """Merge rows while preventing silent deletion or unsupported promotion.
+
+    The merged ledger is sorted most-severe first here rather than demanded of
+    the model, so presentation order can never block a step.
+    """
     if not previous:
-        return tuple(dict(row) for row in proposed), []
+        return sort_assumptions(dict(row) for row in proposed), []
     old = {row["id"]: row for row in previous}
     new = {row.get("id"): row for row in proposed}
     issues = []
@@ -99,7 +115,7 @@ def merge_assumptions(previous, proposed):
         promoted = after.get("status") in ("user_confirmed", "measured")
         if (changed or promoted) and not str(after.get("evidence", "")).strip():
             issues.append(f"assumption {row_id} changed without evidence")
-    return tuple(dict(row) for row in proposed), issues
+    return sort_assumptions(dict(row) for row in proposed), issues
 
 
 def fidelity_feature_issues(previous, proposed):

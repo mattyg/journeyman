@@ -120,3 +120,45 @@ def test_every_gate_block_is_tagged_for_logs_and_ui():
         assert block.startswith("[") and "]\n" in block
         # No HTML or Markdown decoration: the same text serves model and user.
         assert "<" not in block and "**" not in block
+
+
+def _ledger_row(**kw):
+    row = {
+        "id": "plate_height", "name": "Plate height", "value": 68.0,
+        "unit": "mm", "source": "dimensions2.jpg", "confidence": "medium",
+        "consequence": "high", "status": "unverified", "evidence": "",
+        "if_wrong": "overall scale wrong",
+    }
+    row.update(kw)
+    return row
+
+
+def test_ledger_rejection_echoes_what_was_received():
+    """A complaint about the ledger must show the ledger, so it self-locates."""
+    rows = (_ledger_row(), _ledger_row(id="bolt_d", value=12.0))
+    text = turn_protocol.assumption_ledger_required(
+        ["assumption 2 needs source"], rows)
+    assert text.startswith("[assumption ledger required]\n")
+    assert "- assumption 2 needs source" in text
+    assert "Ledger received:" in text
+    assert "1. plate_height = 68.0 mm" in text
+    assert "2. bolt_d = 12.0 mm" in text
+    assert "consequence=high" in text
+
+
+def test_ledger_rejection_without_rows_omits_the_echo():
+    text = turn_protocol.assumption_ledger_required(["provide a ledger"])
+    assert "Ledger received:" not in text
+    assert "Resubmit the script" in text
+
+
+def test_ledger_echo_survives_a_malformed_row():
+    text = turn_protocol.assumption_ledger_required(["bad"], ("not-a-dict",))
+    assert "'not-a-dict'" in text
+
+
+def test_invalid_update_also_echoes_the_ledger():
+    text = turn_protocol.invalid_assumption_update(
+        ["assumption x was removed"], (_ledger_row(),))
+    assert "Ledger received:" in text
+    assert "plate_height" in text

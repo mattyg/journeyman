@@ -71,6 +71,10 @@ class _Turn:
         self.ledger_first_requested = False
         self.multi_feature_retries = 0
         self.noop_retries = 0
+        # Identical gate rejections in a row. A gate repeating itself verbatim
+        # is a deadlock, not correction — see Agent._reject.
+        self.last_rejection = None
+        self.repeated_rejections = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -162,14 +166,32 @@ class Agent:
         self.view_capture = view_capture
         self.access = DocumentAccess(inspector, app, self)
 
-    def _reject(self, feedback, proposal, on_tool_result=None):
+    def _reject(self, feedback, proposal, on_tool_result=None, turn=None):
         """Reject a proposal: tell the model and show the user the same text.
 
         Every gate rejection routes through here so the transcript can never
         drift from what the model was actually told. The tool result carries the
         gate block verbatim — the bracketed tag is the only markup, and it reads
         as a label in the UI and as protocol vocabulary to the model.
+
+        Passing ``turn`` also counts identical rejections. A gate that keeps
+        emitting the same text is not teaching the model anything, and the
+        model cannot escape a rule it has already tried to satisfy — that
+        deadlock costs a whole turn and produces no geometry.
         """
+        if turn is not None:
+            if feedback == turn.last_rejection:
+                turn.repeated_rejections += 1
+            else:
+                turn.last_rejection = feedback
+                turn.repeated_rejections = 1
+            if turn.repeated_rejections > 1:
+                feedback += (
+                    "\n\n[identical rejection repeated]\n"
+                    f"This is rejection {turn.repeated_rejections} with exactly "
+                    "the same text. Re-reading the rule will not resolve it: "
+                    "change what the proposal contains, or call ask_user to "
+                    "resolve the disagreement.")
         self.messages.append({"role": "user", "content": feedback})
         if on_tool_result is not None:
             on_tool_result(
@@ -490,7 +512,7 @@ class Agent:
                     return summary
                 self._reject(
                     turn_protocol.placeholder_code(noop_issues),
-                    proposal, on_tool_result)
+                    proposal, on_tool_result, turn)
                 continue
             turn.noop_retries = 0
 
@@ -510,7 +532,7 @@ class Agent:
                     return summary
                 self._reject(
                     turn_protocol.part_design_required(),
-                    proposal, on_tool_result)
+                    proposal, on_tool_result, turn)
                 continue
 
             if self.settings.structured_cad_planning and not diagnostic:
@@ -526,7 +548,7 @@ class Agent:
                         return summary
                     self._reject(
                         turn_protocol.structured_plan_required(issues),
-                        proposal, on_tool_result)
+                        proposal, on_tool_result, turn)
                     continue
                 turn.planning_retries = 0
                 ledger.update({
@@ -558,7 +580,7 @@ class Agent:
                     and proposal.assumptions is None):
                 turn.ledger_first_requested = True
                 self._reject(
-                    turn_protocol.ledger_first(), proposal, on_tool_result)
+                    turn_protocol.ledger_first(), proposal, on_tool_result, turn)
                 continue
 
             if (self.settings.assumption_ledger and not diagnostic
@@ -569,7 +591,7 @@ class Agent:
                         turn.ledger["assumptions"], proposal.assumptions)
                     issues.extend(merge_issues)
                 else:
-                    merged = tuple(
+                    merged = cad_workflow.sort_assumptions(
                         dict(row) for row in (proposal.assumptions or ()))
                 if issues:
                     turn.assumption_retries += 1
@@ -582,8 +604,9 @@ class Agent:
                             {"role": "assistant", "content": summary})
                         return summary
                     self._reject(
-                        turn_protocol.assumption_ledger_required(issues),
-                        proposal, on_tool_result)
+                        turn_protocol.assumption_ledger_required(
+                            issues, proposal.assumptions or ()),
+                        proposal, on_tool_result, turn)
                     continue
                 turn.ledger["assumptions"] = merged
                 blocking = cad_workflow.blocking_assumptions(merged)
@@ -592,13 +615,13 @@ class Agent:
                     self._reject(
                         turn_protocol.assumption_clarification_required(
                             [row["id"] for row in blocking]),
-                        proposal, on_tool_result)
+                        proposal, on_tool_result, turn)
                     continue
                 if (turn.assumption_clarification
                         and turn.assumption_questions == 0):
                     self._reject(
                         turn_protocol.assumption_clarification_required(),
-                        proposal, on_tool_result)
+                        proposal, on_tool_result, turn)
                     continue
                 turn.assumptions_accepted = True
                 turn.assumption_clarification = False
@@ -622,8 +645,9 @@ class Agent:
                             {"role": "assistant", "content": summary})
                         return summary
                     self._reject(
-                        turn_protocol.invalid_assumption_update(issues),
-                        proposal, on_tool_result)
+                        turn_protocol.invalid_assumption_update(
+                            issues, proposal.assumptions or ()),
+                        proposal, on_tool_result, turn)
                     continue
                 turn.ledger["assumptions"] = merged
                 turn.assumption_retries = 0
@@ -658,7 +682,7 @@ class Agent:
                         return summary
                     self._reject(
                         turn_protocol.fidelity_required(issues),
-                        proposal, on_tool_result)
+                        proposal, on_tool_result, turn)
                     continue
                 turn.ledger["observed_features"] = features
                 turn.fidelity_clarification = False
@@ -678,7 +702,7 @@ class Agent:
                         return summary
                     self._reject(
                         turn_protocol.one_feature_required(issues),
-                        proposal, on_tool_result)
+                        proposal, on_tool_result, turn)
                     continue
                 turn.multi_feature_retries = 0
 

@@ -7,6 +7,7 @@ from freecad.llm_copilot.types import ExecResult
 from freecad.llm_copilot.llm_client import LLMProposal
 from freecad.llm_copilot.llm_client import LLMTimeoutError
 from freecad.llm_copilot.settings import Settings
+from freecad.llm_copilot import cad_workflow
 
 class FakeClient:
     def __init__(self, proposals): self.proposals, self.calls = proposals, []
@@ -1346,3 +1347,99 @@ def test_placeholder_block_is_rejected_before_execution():
     assert asks[0] in [
         m["content"] for m in agent.messages if m["role"] == "user"]
     assert not executor.results, "the placeholder script never ran"
+
+
+def _ledger_row(rid, consequence, confidence="medium"):
+    return {
+        "id": rid, "name": rid, "value": 4.0, "unit": "mm",
+        "source": "hanger3.jpg", "confidence": confidence,
+        "consequence": consequence, "if_wrong": "geometry wrong",
+        "status": "unverified", "evidence": "",
+    }
+
+
+def test_misordered_ledger_runs_and_is_sorted_by_the_host():
+    """Both turns of climbing-hanger-transcript-2 died here.
+
+    A ledger listed in any order was rejected with a complaint that named no
+    row, so a complete, working hanger script was discarded twice. Row order is
+    presentation: accept it and sort it.
+    """
+    client = FakeClient([
+        LLMProposal(
+            "build the hanger",
+            "body = doc.addObject('PartDesign::Body','HangerBody')\n", "", True,
+            assumptions=(
+                _ledger_row("thickness", "medium"),
+                _ledger_row("plate_h", "high"),
+                _ledger_row("bolt_d", "low"))),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "HangerBody", "")])
+    shown = []
+    agent = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, assumption_ledger=True,
+                  mandatory_verification=False, final_design_review=False))
+    stored = []
+    original = cad_workflow.sort_assumptions
+
+    def capture(rows):
+        result = original(rows)
+        stored[:] = result
+        return result
+
+    cad_workflow.sort_assumptions = capture
+    try:
+        out = agent.send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    finally:
+        cad_workflow.sort_assumptions = original
+    assert out == "Done"
+    assert not [t for t in shown if t.startswith("[assumption ledger required]")]
+    assert not executor.results, "the script never ran"
+    # Stored most-severe-first regardless of the order the model chose.
+    assert [row["id"] for row in stored] == ["plate_h", "thickness", "bolt_d"]
+
+
+def test_identical_gate_rejection_escalates_instead_of_looping():
+    """A gate repeating itself verbatim is a deadlock, not correction."""
+    bad = LLMProposal("try part", "pass", "", True, strategy="part")
+    client = FakeClient([
+        bad, bad,
+        LLMProposal("native", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    agent = _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True))
+    out = agent.send(
+        "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    escalated = [t for t in shown if "[identical rejection repeated]" in t]
+    assert len(escalated) == 1
+    assert "rejection 2 with exactly the same text" in escalated[0]
+    # Still single-sourced: the user sees exactly what the model was told.
+    assert escalated[0] in [
+        m["content"] for m in agent.messages if m["role"] == "user"]
+
+
+def test_a_different_rejection_resets_the_repeat_counter():
+    client = FakeClient([
+        LLMProposal("try part", "pass", "", True, strategy="part"),
+        LLMProposal("no plan", "pass", "", True, plan=()),
+        LLMProposal("try part", "pass", "", True, strategy="part"),
+        LLMProposal("native", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True, structured_cad_planning=True)).send(
+            "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert not [t for t in shown if "[identical rejection repeated]" in t]

@@ -77,7 +77,7 @@ def test_assumption_ledger_validation_and_blocking():
     assert cad_workflow.blocking_assumptions(rows) == rows
 
 
-def test_assumption_ledger_rejects_bad_order_and_duplicate_ids():
+def test_assumption_ledger_rejects_duplicate_ids():
     rows = (
         _assumption(consequence="low"),
         _assumption(consequence="high"),
@@ -86,7 +86,50 @@ def test_assumption_ledger_rejects_bad_order_and_duplicate_ids():
         SimpleNamespace(assumptions=rows),
         SimpleNamespace(assumptions_accepted=False))
     assert any("duplicate" in issue for issue in issues)
-    assert any("sorted" in issue for issue in issues)
+    # Row order is no longer a defect: it is presentation, and the host sorts it.
+    assert not any("sorted" in issue for issue in issues)
+
+
+def test_row_order_never_blocks_a_step():
+    """A mis-sorted ledger deadlocked a real run; sorting is the host's job."""
+    rows = (
+        _assumption(id="a", consequence="low"),
+        _assumption(id="b", consequence="high"),
+        _assumption(id="c", consequence="medium"),
+    )
+    assert cad_workflow.assumption_ledger_missing(
+        SimpleNamespace(assumptions=rows),
+        SimpleNamespace(assumptions_accepted=False)) == []
+
+
+def test_sort_assumptions_orders_most_severe_first_and_is_stable():
+    rows = (
+        _assumption(id="a", consequence="low"),
+        _assumption(id="b", consequence="high"),
+        _assumption(id="c", consequence="medium"),
+        _assumption(id="d", consequence="high"),
+    )
+    assert [row["id"] for row in cad_workflow.sort_assumptions(rows)] == [
+        "b", "d", "c", "a"]
+
+
+def test_sort_assumptions_puts_invalid_consequence_last():
+    rows = (
+        _assumption(id="bad", consequence="CRITICAL"),
+        _assumption(id="ok", consequence="high"),
+    )
+    assert [row["id"] for row in cad_workflow.sort_assumptions(rows)] == [
+        "ok", "bad"]
+
+
+def test_merged_ledger_comes_back_sorted():
+    proposed = (
+        _assumption(id="a", consequence="low"),
+        _assumption(id="b", consequence="high"),
+    )
+    merged, issues = cad_workflow.merge_assumptions((), proposed)
+    assert issues == []
+    assert [row["id"] for row in merged] == ["b", "a"]
 
 
 def test_merge_assumptions_requires_evidence_and_ledger_renders_rows():
