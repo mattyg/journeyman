@@ -75,7 +75,13 @@ SYSTEM_PROMPT = (
     "an inspection or validation problem; they are structural FreeCAD objects.\n"
     "- Do not call recompute for transaction/undo purposes or manage "
     "transactions; the host wraps each script in one undoable transaction. You "
-    "MAY call doc.recompute() when a feature needs recomputing to proceed."
+    "MAY call doc.recompute() when a feature needs recomputing to proceed.\n"
+    "- Two helpers are preloaded; prefer them over hand-rolled checks, which "
+    "raise opaque OCC errors or pass silently on a null shape. "
+    "assert_feature(obj, solids=None) raises a specific error unless obj built "
+    "real geometry; assert_sketch_constrained(sk) raises unless a sketch is "
+    "closed and fully constrained. Call them after creating a feature, so a "
+    "failure names the step that caused it."
 )
 
 _WORKFLOW_PROMPT = (

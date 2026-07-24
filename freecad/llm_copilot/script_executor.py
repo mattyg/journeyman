@@ -77,11 +77,65 @@ def _annotate_traceback(script, text, context=2):
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
+def assert_feature(obj, solids=None):
+    """Raise a specific error unless ``obj`` built into usable geometry.
+
+    Hand-rolled checks (``pad.Shape.isValid()``) raise an opaque OCC error when
+    a feature fails, or silently pass on a null shape — either way the script
+    reports the wrong thing about which step broke. This names the failure.
+
+    Pass ``solids`` to also assert an exact solid count.
+    """
+    name = getattr(obj, "Name", None) or repr(obj)
+    if obj is None:
+        raise ValueError("assert_feature: no object (the feature was not created)")
+    errors = getattr(obj, "State", None)
+    if errors and "Invalid" in errors:
+        raise ValueError(f"{name} is in an Invalid state: {errors}")
+    shape = getattr(obj, "Shape", None)
+    if shape is None or shape.isNull():
+        raise ValueError(
+            f"{name} produced a NULL shape — the feature failed to build. "
+            "Check that its sketch forms a single closed wire and that the "
+            "profile and length are set.")
+    if not shape.isValid():
+        raise ValueError(f"{name} produced an invalid shape")
+    count = len(shape.Solids)
+    if solids is not None and count != solids:
+        raise ValueError(
+            f"{name} produced {count} solids, expected {solids}")
+    if solids is None and count == 0:
+        raise ValueError(
+            f"{name} produced no solids — the feature added no material")
+    return obj
+
+
+def assert_sketch_constrained(sketch):
+    """Raise unless ``sketch`` is closed and fully constrained."""
+    name = getattr(sketch, "Name", None) or repr(sketch)
+    shape = getattr(sketch, "Shape", None)
+    if shape is None or shape.isNull():
+        raise ValueError(f"{name} has no shape")
+    if shape.Wires and not all(wire.isClosed() for wire in shape.Wires):
+        raise ValueError(
+            f"{name} is not a closed wire; a pad or pocket profile must close")
+    dof = sketch.solve() if hasattr(sketch, "solve") else 0
+    remaining = getattr(sketch, "FullyConstrained", None)
+    if remaining is False:
+        raise ValueError(
+            f"{name} is not fully constrained (solver status {dof})")
+    return sketch
+
+
 def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecResult":
     doc = app.ActiveDocument
     if doc is None:
         return ExecResult(False, "", "NO_ACTIVE_DOCUMENT")
-    g = {"App": app, "FreeCAD": app}
+    g = {
+        "App": app, "FreeCAD": app,
+        "assert_feature": assert_feature,
+        "assert_sketch_constrained": assert_sketch_constrained,
+    }
     try:
         import Part
         g["Part"] = Part
