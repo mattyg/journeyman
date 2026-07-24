@@ -128,6 +128,13 @@ class LLMCopilotPreferencesPage:
             ".FCStd file. Clear context removes embedded history even when "
             "this option is disabled.")
         cf.addWidget(self.persistHistoryCheck)
+        self.keepScriptCheck = QtGui.QCheckBox(
+            "Keep executed script source in conversation history")
+        self.keepScriptCheck.setToolTip(
+            "By default a successful step's Python source is dropped from the "
+            "model context to save tokens (the document diff stays). Enable "
+            "this to retain full scripts for later reference.")
+        cf.addWidget(self.keepScriptCheck)
         outer.addWidget(conversation)
 
         harness = QtGui.QGroupBox("Self-checking harness", self.form)
@@ -245,6 +252,8 @@ class LLMCopilotPreferencesPage:
         self.retriesSpin.setValue(p.GetInt("SelfCorrectionAttempts", 3))
         self.persistHistoryCheck.setChecked(
             p.GetBool("PersistChatHistory", True))
+        self.keepScriptCheck.setChecked(
+            p.GetBool("KeepScriptHistory", False))
         for widget, key, default in self._harness_controls():
             widget.setChecked(p.GetBool(key, default))
         for widget, key, default in self._workflow_controls():
@@ -276,6 +285,8 @@ class LLMCopilotPreferencesPage:
         p.SetInt("SelfCorrectionAttempts", self.retriesSpin.value())
         p.SetBool("PersistChatHistory",
                   self.persistHistoryCheck.isChecked())
+        p.SetBool("KeepScriptHistory",
+                  self.keepScriptCheck.isChecked())
         for widget, key, _default in self._harness_controls():
             p.SetBool(key, widget.isChecked())
         for widget, key, _default in self._workflow_controls():

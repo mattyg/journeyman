@@ -72,6 +72,7 @@ class Settings:
     render_strategy: str = "global_and_changed"
     max_isolated_images: int = 4
     persist_chat_history: bool = True
+    keep_script_history: bool = False
     structured_cad_planning: bool = False
     parametric_feature_preference: bool = False
     sketch_constraint_verification: bool = False
@@ -272,6 +273,7 @@ def load_settings(param_get) -> "Settings":
         max_isolated_images=max(
             0, min(20, param_get.GetInt("MaxIsolatedImages", 4))),
         persist_chat_history=param_get.GetBool("PersistChatHistory", True),
+        keep_script_history=param_get.GetBool("KeepScriptHistory", False),
         structured_cad_planning=param_get.GetBool(
             "StructuredCADPlanning", True),
         parametric_feature_preference=param_get.GetBool(
@@ -315,6 +317,7 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetString("RenderStrategy", settings.render_strategy)
     param_get.SetInt("MaxIsolatedImages", settings.max_isolated_images)
     param_get.SetBool("PersistChatHistory", settings.persist_chat_history)
+    param_get.SetBool("KeepScriptHistory", settings.keep_script_history)
     param_get.SetBool("StructuredCADPlanning", settings.structured_cad_planning)
     param_get.SetBool(
         "ParametricFeaturePreference", settings.parametric_feature_preference)
