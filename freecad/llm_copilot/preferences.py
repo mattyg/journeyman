@@ -117,6 +117,13 @@ class LLMCopilotPreferencesPage:
         self.retriesSpin = QtGui.QSpinBox()
         self.retriesSpin.setRange(0, 20)
         af.addRow("Self-correction attempts", self.retriesSpin)
+        self.featureRetrySpin = QtGui.QSpinBox()
+        self.featureRetrySpin.setRange(1, 10)
+        self.featureRetrySpin.setToolTip(
+            "Stop after a single feature fails this many times with the same "
+            "error. Retrying an identical failure rarely helps; a lower value "
+            "surfaces the problem sooner instead of accumulating damage.")
+        af.addRow("Per-feature retry cap", self.featureRetrySpin)
         outer.addWidget(autonomy)
 
         conversation = QtGui.QGroupBox("Conversation", self.form)
@@ -250,6 +257,7 @@ class LLMCopilotPreferencesPage:
         self.autoApproveCheck.setChecked(p.GetBool("AutoApproveLoop", False))
         self.maxStepsSpin.setValue(p.GetInt("MaxAutoApprovedSteps", 5))
         self.retriesSpin.setValue(p.GetInt("SelfCorrectionAttempts", 3))
+        self.featureRetrySpin.setValue(p.GetInt("FeatureRetryCap", 2))
         self.persistHistoryCheck.setChecked(
             p.GetBool("PersistChatHistory", True))
         self.keepScriptCheck.setChecked(
@@ -283,6 +291,7 @@ class LLMCopilotPreferencesPage:
         p.SetBool("AutoApproveLoop", self.autoApproveCheck.isChecked())
         p.SetInt("MaxAutoApprovedSteps", self.maxStepsSpin.value())
         p.SetInt("SelfCorrectionAttempts", self.retriesSpin.value())
+        p.SetInt("FeatureRetryCap", self.featureRetrySpin.value())
         p.SetBool("PersistChatHistory",
                   self.persistHistoryCheck.isChecked())
         p.SetBool("KeepScriptHistory",

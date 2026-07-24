@@ -1027,3 +1027,85 @@ def test_document_access_prefers_inspector_attributes_for_state_and_inspect():
     assert access.state() == {"objects": {"via": "attr"}}
     assert access.inspect("edges") == "inspected:edges"
     assert access.api_lookup("q", "Part", "Box") == "api:Part.Box"
+
+
+def _occ_failure(line=13):
+    return ExecResult(
+        False, "",
+        f'  File "<llm_script>", line {line}, in <module>\n'
+        "Part.OCCError: 19Standard_NullObject BRepCheck_Analyzer::Init() "
+        "- NULL shape\n")
+
+
+def test_same_feature_failing_the_same_way_stops_at_the_cap():
+    """The climbing-hanger loop: six PlatePad attempts, one error, no progress."""
+    client = FakeClient([
+        LLMProposal(f"pad the plate ({n})", f"pad = {n}", "", True, plan_step=1)
+        for n in range(6)])
+    executor = FakeExecutor([_occ_failure() for _ in range(6)])
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, feature_retry_cap=2,
+                  self_correction_attempts=99)).send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None)
+    assert "couldn't build this feature" in out
+    assert "failed 3 times with the same error" in out
+    assert "OCCError" in out
+    # Stopped at the cap: three attempts consumed, the rest untouched.
+    assert len(executor.results) == 3
+
+
+def test_repeated_failure_nudge_reaches_model_and_user():
+    client = FakeClient([
+        LLMProposal("pad", "a", "", True, plan_step=1),
+        LLMProposal("pad again", "b", "", True, plan_step=1),
+        LLMProposal("", "", "Gave up", False, kind="finish"),
+    ])
+    executor = FakeExecutor([_occ_failure(), _occ_failure()])
+    shown = []
+    agent = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, feature_retry_cap=5,
+                  self_correction_attempts=99))
+    agent.send(
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content: shown.append(content))
+    nudges = [t for t in shown if t.startswith("[repeated failure")]
+    assert len(nudges) == 1
+    assert "OCCError" in nudges[0]
+    sent = [m["content"] for m in agent.messages if m["role"] == "user"]
+    assert nudges[0] in sent
+
+
+def test_a_different_error_on_the_same_step_resets_the_counter():
+    client = FakeClient([
+        LLMProposal("pad", "a", "", True, plan_step=1),
+        LLMProposal("pad", "b", "", True, plan_step=1),
+        LLMProposal("pad", "c", "", True, plan_step=1),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([
+        _occ_failure(),
+        ExecResult(False, "", "ValueError: bad radius\n"),
+        _occ_failure(),
+    ])
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, feature_retry_cap=2,
+                  self_correction_attempts=99)).send(
+            "model it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+    # Never three of a kind in a row, so the cap never fires.
+    assert out == "Done"
+    assert not executor.results
+
+
+def test_feature_signature_ignores_cosmetic_script_changes():
+    from freecad.llm_copilot.agent import _feature_signature
+    first = LLMProposal("pad", "pad.Length = 4.0", "", True, plan_step=2)
+    second = LLMProposal("pad", "pad.Length = 5.0", "", True, plan_step=2)
+    assert (_feature_signature(first, _occ_failure(13))
+            == _feature_signature(second, _occ_failure(21)))
+    other_step = LLMProposal("hole", "x", "", True, plan_step=3)
+    assert (_feature_signature(first, _occ_failure())
+            != _feature_signature(other_step, _occ_failure()))

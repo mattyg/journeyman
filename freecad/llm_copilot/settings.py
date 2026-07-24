@@ -86,6 +86,9 @@ class Settings:
     assumption_ledger: bool = False
     fidelity_target: str = "unspecified"
     mark_inferred_features: bool = False
+    # Appended last: Settings is constructed positionally in places,
+    # so new fields must not shift the existing order.
+    feature_retry_cap: int = 2
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -260,6 +263,8 @@ def load_settings(param_get) -> "Settings":
         auto_approve_loop=param_get.GetBool("AutoApproveLoop", False),
         max_auto_approved_steps=param_get.GetInt("MaxAutoApprovedSteps", 5),
         self_correction_attempts=param_get.GetInt("SelfCorrectionAttempts", 3),
+        feature_retry_cap=max(
+            1, min(10, param_get.GetInt("FeatureRetryCap", 2))),
         reasoning_effort=param_get.GetString("ReasoningEffort", "off"),
         enhanced_validation=param_get.GetBool("EnhancedValidation", True),
         structured_diff=param_get.GetBool("StructuredDiff", True),
@@ -306,6 +311,7 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetBool("AutoApproveLoop", settings.auto_approve_loop)
     param_get.SetInt("MaxAutoApprovedSteps", settings.max_auto_approved_steps)
     param_get.SetInt("SelfCorrectionAttempts", settings.self_correction_attempts)
+    param_get.SetInt("FeatureRetryCap", settings.feature_retry_cap)
     param_get.SetBool("EnhancedValidation", settings.enhanced_validation)
     param_get.SetBool("StructuredDiff", settings.structured_diff)
     param_get.SetBool("MandatoryVerification", settings.mandatory_verification)

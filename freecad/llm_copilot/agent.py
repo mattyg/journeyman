@@ -1,4 +1,5 @@
 # freecad/llm_copilot/agent.py
+import re
 
 
 class AgentCancelled(Exception):
@@ -60,11 +61,36 @@ class _Turn:
         self.fidelity_clarification = False
         self.fidelity_questions = 0
         self.part_design_retries = 0
+        # Consecutive failures of the same plan step with the same error, so a
+        # feature that will not build is abandoned rather than retried
+        # cosmetically. See _feature_signature.
+        self.feature_signature = None
+        self.feature_failures = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
             "completed_steps": 0, "warnings": (),
         }
+
+
+_EXCEPTION_LINE = re.compile(
+    r"^(?:\w+\.)*(\w*(?:Error|Exception|Failure))\b", re.MULTILINE)
+
+
+def _feature_signature(proposal, result):
+    """Identify *which feature failed how*, ignoring cosmetic script edits.
+
+    Keyed on the plan step plus the exception type, so retrying the same
+    feature with reshuffled numbers still reads as the same failure — the
+    pattern that otherwise repeats until the whole-turn budget runs out.
+    """
+    error = getattr(result, "error", "") or ""
+    kinds = _EXCEPTION_LINE.findall(error)
+    if getattr(result, "validation", "") and not kinds:
+        kind = "ValidationFailure"
+    else:
+        kind = kinds[-1] if kinds else "UnknownError"
+    return (getattr(proposal, "plan_step", 0) or 0, kind)
 
 
 class DocumentAccess:
@@ -760,22 +786,46 @@ class Agent:
                 continue
 
             # error path
+            signature = _feature_signature(proposal, result)
+            if signature == turn.feature_signature:
+                turn.feature_failures += 1
+            else:
+                turn.feature_signature = signature
+                turn.feature_failures = 1
+            # Two independent budgets: the whole-turn correction allowance, and
+            # a tighter per-feature cap that fires when the *same* feature keeps
+            # failing the *same* way (harness Stage 4). Report whichever binds.
+            stuck = turn.feature_failures > self.settings.feature_retry_cap
             turn.retries += 1
-            if turn.retries >= self.settings.self_correction_attempts:
+            if stuck or turn.retries >= self.settings.self_correction_attempts:
                 # Keep the full diagnostics in history so later turns see the
                 # same detail the user saw, not just the last error line.
                 self.messages.append({
                     "role": "user",
                     "content": turn_protocol.failure_feedback(result),
                 })
-                summary = ("I couldn't complete this after "
-                           f"{turn.retries} attempts. Last error:\n{result.error}")
+                if stuck:
+                    summary = (
+                        "I couldn't build this feature: it failed "
+                        f"{turn.feature_failures} times with the same error "
+                        f"({signature[1]}). Last error:\n{result.error}")
+                else:
+                    summary = (
+                        "I couldn't complete this after "
+                        f"{turn.retries} attempts. Last error:\n{result.error}")
                 self.messages.append({"role": "assistant", "content": summary})
                 return summary
             self.messages.append({
                 "role": "user",
                 "content": turn_protocol.failure_feedback(result),
             })
+            if turn.feature_failures > 1:
+                feedback = turn_protocol.repeated_failure(
+                    signature[1], turn.feature_failures)
+                self.messages.append({"role": "user", "content": feedback})
+                if on_tool_result is not None:
+                    on_tool_result(
+                        "run_freecad_script", proposal.intent, feedback)
             if (self.settings.freecad_api_lookup
                     and any(marker in result.error for marker in (
                         "AttributeError", "TypeError", "has no attribute",

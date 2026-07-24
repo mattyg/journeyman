@@ -124,6 +124,16 @@ def fidelity_required(issues):
         "omission approval.")
 
 
+def repeated_failure(kind, attempts):
+    """The same feature has failed the same way ``attempts`` times running."""
+    return _gate(
+        "repeated failure — change approach", (),
+        f"This step has now failed {attempts} times with the same error "
+        f"({kind}). Retrying the same construction will not help. Diagnose "
+        "before building again: inspect the objects involved with a read-only "
+        "script, or state a different construction strategy for this feature.")
+
+
 def part_design_violation(issues):
     """The script ran, produced non-Part-Design geometry, and was rolled back."""
     return _gate(
