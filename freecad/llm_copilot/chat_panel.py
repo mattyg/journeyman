@@ -111,6 +111,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _build_agent(self):
         settings = load_settings(FreeCAD.ParamGet(PARAM_PATH))
+        self._model_label = model_display_name(settings.model)
         main = self._main
 
         # Wrap FreeCAD-touching calls so they run on the main thread even though
@@ -259,7 +260,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         def work():
             try:
                 out = self.agent.send(msg, on_intent, on_result, on_reasoning)
-                self.resultReady.emit(f"<b>Copilot:</b> {out}")
+                self.resultReady.emit(f"<b>{self._model_label}:</b> {out}")
             except Exception as e:
                 import traceback
                 FreeCAD.Console.PrintError(

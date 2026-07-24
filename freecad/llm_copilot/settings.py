@@ -200,6 +200,22 @@ def _resolve_model(provider: str, bare_model: str) -> str:
     return provider + "/" + bare_model
 
 
+def model_display_name(model: str) -> str:
+    """A short, readable label for a model id, for use in the chat transcript.
+
+    Strips the provider prefix and any vendor path, then title-cases the bare id:
+      "openrouter/moonshotai/kimi-k3" -> "Kimi K3"
+      "anthropic/claude-opus-4-8"     -> "Claude Opus 4 8"
+      "ollama/llama3"                 -> "Llama3"
+    Falls back to "Copilot" when no model is set.
+    """
+    if not model:
+        return "Copilot"
+    bare = model.rsplit("/", 1)[-1]          # last path segment
+    words = bare.replace("_", "-").split("-")
+    return " ".join(w[:1].upper() + w[1:] if w else w for w in words) or "Copilot"
+
+
 def load_settings(param_get) -> "Settings":
     provider = get_provider(param_get)
     bare_model = get_model_for_provider(param_get, provider)
