@@ -1,4 +1,5 @@
 import io
+import re
 import traceback
 import contextlib
 from .types import ExecResult
@@ -42,6 +43,38 @@ def _capture_console(console, warning_buffer, error_buffer):
     finally:
         for name, original in originals.items():
             setattr(console, name, original)
+
+
+_SCRIPT_FRAME = re.compile(
+    r'^(\s*)File "<llm_script>", line (\d+)(?:, in .*)?$')
+
+
+def _annotate_traceback(script, text, context=2):
+    """Splice the offending source lines into ``<llm_script>`` frames.
+
+    A traceback that says only ``line 13`` forces the model to count lines by
+    hand to find what failed — which it does unreliably, burning turns on
+    misidentified statements. Showing the source at the fault, with a little
+    context, makes the error self-locating.
+    """
+    lines = script.splitlines()
+    out = []
+    for entry in text.splitlines():
+        out.append(entry)
+        match = _SCRIPT_FRAME.match(entry)
+        if match is None:
+            continue
+        indent, number = match.group(1), int(match.group(2))
+        if not 1 <= number <= len(lines):
+            continue
+        start = max(1, number - context)
+        end = min(len(lines), number + context)
+        width = len(str(end))
+        for current in range(start, end + 1):
+            marker = ">>>" if current == number else "   "
+            out.append(
+                f"{indent}  {marker} {current:{width}d} | {lines[current - 1]}")
+    return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
 def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecResult":
@@ -99,7 +132,8 @@ def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecRes
         return result(True, validation_ok=validation_ok, validation=validation)
     except Exception:
         doc.abortTransaction()
-        return result(False, traceback.format_exc())
+        return result(
+            False, _annotate_traceback(script, traceback.format_exc()))
 
 def undo(app) -> None:
     doc = app.ActiveDocument
