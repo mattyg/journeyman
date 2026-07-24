@@ -29,12 +29,7 @@ def _origin_plane_names(obj):
     features = getattr(origin, "OriginFeatures", None) if origin is not None else None
     if not features:
         return []
-    names = []
-    for f in features:
-        name = getattr(f, "Name", "")
-        if name:
-            names.append(name)
-    return names
+    return [name for f in features if (name := getattr(f, "Name", ""))]
 
 
 def _safe_value(value):

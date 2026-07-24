@@ -86,11 +86,8 @@ def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecRes
             validation_ok, validation = True, ""
             if validate:
                 after_state = document_inspector.document_state(app, rich=True)
-                old = before_state.get("objects", {})
-                new = after_state.get("objects", {})
-                changed_names = [
-                    name for name in new
-                    if name not in old or old.get(name) != new.get(name)]
+                changed_names = document_inspector.DocumentDelta(
+                    before_state, after_state).changed_names
                 validation_ok, validation = document_inspector.validate(
                     app, names=changed_names)
                 if not validation_ok and rollback_on_failure:

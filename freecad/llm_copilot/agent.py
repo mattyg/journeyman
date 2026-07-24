@@ -241,7 +241,7 @@ class Agent:
             content = request_text
         self.messages.append({"role": "user", "content": content})
         turn = _Turn()
-        ledger = turn.ledger
+        ledger = turn.ledger  # same dict; a short alias for the execution block
         while True:
             check_cancelled()
             if on_context is not None and context_cursor < len(self.messages):
