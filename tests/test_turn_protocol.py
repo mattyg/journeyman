@@ -162,3 +162,32 @@ def test_invalid_update_also_echoes_the_ledger():
         ["assumption x was removed"], (_ledger_row(),))
     assert "Ledger received:" in text
     assert "plate_height" in text
+
+
+def test_blocked_carries_every_objection_in_one_message():
+    text = turn_protocol.blocked(
+        [turn_protocol.part_design_required(),
+         turn_protocol.placeholder_code(["the for block at line 2 does nothing"])],
+        ["provide an ordered feature-level plan", "this step builds 2 features"])
+    assert "[Part Design required]" in text
+    assert "[placeholder code]" in text
+    assert "also advisory" in text
+    assert "- provide an ordered feature-level plan" in text
+    assert "- this step builds 2 features" in text
+
+
+def test_blocked_without_advisories_omits_the_section():
+    text = turn_protocol.blocked([turn_protocol.part_design_required()])
+    assert "also advisory" not in text
+
+
+def test_advisories_block_says_the_step_ran():
+    text = turn_protocol.advisories(["this step builds 2 features"])
+    assert text.startswith("[workflow advisories]\n")
+    assert "- this step builds 2 features" in text
+    assert "The step ran." in text
+    assert "<" not in text and "**" not in text
+
+
+def test_no_advisories_renders_nothing():
+    assert turn_protocol.advisories([]) == ""

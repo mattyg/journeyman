@@ -59,6 +59,31 @@ def _gate(tag, issues, instruction):
     return f"[{tag}]\n{body}\n{instruction}" if body else f"[{tag}]\n{instruction}"
 
 
+def blocked(blocking, advisories=()):
+    """One message carrying every objection to a proposal, not just the first.
+
+    Surfacing objections one per round makes the model fix a rule, resubmit,
+    and meet the next rule — a whole script discarded each time. Advisories ride
+    along so a single revision can resolve everything that was irregular.
+    """
+    text = "\n\n".join(blocking)
+    if advisories:
+        text += (
+            "\n\n[also advisory — these did not block the step]\n"
+            + "\n".join("- " + issue for issue in advisories))
+    return text
+
+
+def advisories(issues):
+    """Irregularities that did not stop the step from running."""
+    if not issues:
+        return ""
+    return _gate(
+        "workflow advisories", issues,
+        "The step ran. These did not block it; address them in the next step "
+        "or say why the current construction is intentional.")
+
+
 def part_design_required():
     """The model proposed a non-Part-Design strategy."""
     return _gate(

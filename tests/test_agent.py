@@ -635,7 +635,7 @@ def test_legacy_history_drops_superseded_snapshots_ledgers_and_scripts():
     assert "SECRET SOURCE" not in text
 
 
-def test_structured_plan_is_required_before_execution_and_ledger_is_sent():
+def test_missing_plan_is_advisory_and_ledger_is_sent():
     planned = dict(
         strategy="part_design", stage="sketch",
         plan=("Create constrained profile", "Pad profile"),
@@ -646,7 +646,7 @@ def test_structured_plan_is_required_before_execution_and_ledger_is_sent():
         LLMProposal("Create the profile", "pass", "", True, **planned),
         LLMProposal("", "", "Done", False, kind="finish"),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
+    executor = FakeExecutor([ExecResult(True, "", ""), ExecResult(True, "", "")])
     out = _agent(
         client, executor,
         _settings(structured_cad_planning=True,
@@ -654,8 +654,10 @@ def test_structured_plan_is_required_before_execution_and_ledger_is_sent():
                   auto_approve_loop=True)).send(
         "make a part", lambda i: True, lambda r, s, i, p: None)
     assert out == "Done"
-    assert not executor.results
-    assert any("[structured CAD plan required]" in str(call)
+    # A missing plan is metadata: it no longer discards the script, but the
+    # model is told about it alongside the step that ran.
+    assert any("[workflow advisories]" in str(call) for call in client.calls)
+    assert any("ordered feature-level plan" in str(call)
                for call in client.calls)
     assert "[design ledger]" in str(client.calls[-1])
 
@@ -700,16 +702,16 @@ def test_missing_assumption_ledger_is_corrected_before_execution():
         LLMProposal("build", "pass", "", True, assumptions=()),
         LLMProposal("", "", "Done", False, kind="finish"),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     out = _agent(
         client, executor,
         _settings(assumption_ledger=True, auto_approve_loop=True)).send(
             "make it", lambda _intent: True,
             lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    assert not executor.results
-    # A first step carrying no ledger at all is met by the ledger-first ask.
-    assert any("[assumptions and plan first]" in str(call)
+    # A first step carrying no ledger is asked for one, but still runs: the
+    # request is what matters, and refusing costs a whole turn.
+    assert any("provide an assumption ledger with this step" in str(call)
                for call in client.calls)
 
 
@@ -721,15 +723,14 @@ def test_malformed_assumption_ledger_is_corrected_before_execution():
         LLMProposal("build", "pass", "", True, assumptions=(_assumption(),)),
         LLMProposal("", "", "Done", False, kind="finish"),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     out = _agent(
         client, executor,
         _settings(assumption_ledger=True, auto_approve_loop=True)).send(
             "make it", lambda _intent: True, lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    assert not executor.results
-    assert any("[assumption ledger required]" in str(call)
-               for call in client.calls)
+    assert any("[workflow advisories]" in str(call) for call in client.calls)
+    assert any("invalid confidence" in str(call) for call in client.calls)
 
 
 def _feature(status="planned", evidence=""):
@@ -739,7 +740,7 @@ def _feature(status="planned", evidence=""):
     }
 
 
-def test_replica_blocks_difficult_feature_omission_before_execution():
+def test_replica_blocked_feature_is_advisory_but_blocks_the_finish():
     client = FakeClient([
         LLMProposal(
             "make flat approximation", "pass", "", True,
@@ -755,16 +756,16 @@ def test_replica_blocks_difficult_feature_omission_before_execution():
             "", "", "Done", False, kind="finish",
             fidelity_met=True, fidelity_omissions=()),
     ])
-    executor = FakeExecutor([
-        ExecResult(True, "", ""), ExecResult(True, "", "")])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 3)
     out = _agent(
         client, executor,
         _settings(fidelity_target="replica", auto_approve_loop=True)).send(
             "replicate hanger", lambda _intent: True,
             lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    assert not executor.results
-    assert any("[replica fidelity required]" in str(call)
+    # Difficulty is reported as an advisory rather than discarding the script;
+    # the completion gate is what refuses to finish on an unresolved feature.
+    assert any("difficulty is not permission to omit" in str(call)
                for call in client.calls)
 
 
@@ -817,7 +818,7 @@ def test_replica_omission_requires_explicit_question_round():
             "", "", "Done", False, kind="finish",
             fidelity_met=True, fidelity_omissions=("lower_bend",)),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     out = _agent(
         client, executor,
         _settings(fidelity_target="replica", auto_approve_loop=True)).send(
@@ -828,7 +829,7 @@ def test_replica_omission_requires_explicit_question_round():
     assert not executor.results
 
 
-def test_fidelity_rejection_shows_user_the_reason_sent_to_the_model():
+def test_fidelity_advisory_shows_user_the_text_sent_to_the_model():
     client = FakeClient([
         LLMProposal(
             "start bend", "pass", "", True,
@@ -841,27 +842,20 @@ def test_fidelity_rejection_shows_user_the_reason_sent_to_the_model():
             "", "", "Done", False, kind="finish",
             fidelity_met=True, fidelity_omissions=()),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
-    tool_results = []
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     out = _agent(
         client, executor,
         _settings(fidelity_target="replica", auto_approve_loop=True)).send(
             "replicate hanger", lambda _intent: True,
-            lambda _r, _s, _i, _p: None,
-            on_tool_result=lambda tool, summary, content:
-            tool_results.append((tool, summary, content)))
+            lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    tool, summary, content = tool_results[0]
-    assert (tool, summary) == ("run_freecad_script", "start bend")
-    # The user sees the same tagged block the model was given, naming the
-    # actual objection — not a bare "rejected" note.
-    assert content.startswith("[replica fidelity required]\n")
-    assert "blocked" in content
-    # And it is byte-identical to what went into the model's history.
-    sent = [
-        message["content"] for message in client.calls[-1]
-        if message["role"] == "user"]
-    assert content in sent
+    # The objection is named in the advisory the model receives with its step,
+    # rather than discarding a working script before it runs.
+    advisory = [
+        str(call) for call in client.calls
+        if "[workflow advisories]" in str(call)]
+    assert advisory
+    assert "difficulty is not permission to omit" in advisory[-1]
 
 
 def _gate_feedback_pairs(client, executor, settings, **send_kw):
@@ -1214,7 +1208,7 @@ def _assumption(**kw):
     return row
 
 
-def test_first_building_step_is_sent_back_for_assumptions_and_a_plan():
+def test_first_building_step_is_asked_for_assumptions_and_still_runs():
     """Harness Stage 2: no geometry before the assumption ledger exists."""
     build = "body = doc.addObject('PartDesign::Body', 'B')"
     client = FakeClient([
@@ -1224,21 +1218,17 @@ def test_first_building_step_is_sent_back_for_assumptions_and_a_plan():
             assumptions=(_assumption(),)),
         LLMProposal("", "", "Done", False, kind="finish"),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
-    shown = []
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     agent = _agent(
         client, executor,
         _settings(auto_approve_loop=True, assumption_ledger=True))
     out = agent.send(
-        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
-        on_tool_result=lambda tool, summary, content: shown.append(content))
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    asks = [t for t in shown if t.startswith("[assumptions and plan first]")]
-    assert len(asks) == 1, "the ledger-first turn must fire exactly once"
-    # Shown to the user is exactly what the model was told.
-    assert asks[0] in [
-        m["content"] for m in agent.messages if m["role"] == "user"]
-    # It ran only after the ledger arrived — the first attempt never executed.
+    asks = [str(call) for call in client.calls
+            if "provide an assumption ledger with this step" in str(call)]
+    assert asks, "the model must still be asked for a ledger"
+    # But the step ran: asking is what matters, not withholding execution.
     assert not executor.results
 
 
@@ -1274,7 +1264,7 @@ def test_ledger_first_never_blocks_a_diagnostic():
     assert not [t for t in shown if t.startswith("[")]
 
 
-def test_multi_feature_step_is_split_before_execution():
+def test_multi_feature_step_is_advised_not_blocked():
     """Per-feature verification is only real if a step builds one feature."""
     batched = (
         "pad = body.newObject('PartDesign::Pad','PlatePad')\n"
@@ -1285,21 +1275,18 @@ def test_multi_feature_step_is_split_before_execution():
         LLMProposal("pad only", single, "", True),
         LLMProposal("", "", "Done", False, kind="finish"),
     ])
-    executor = FakeExecutor([ExecResult(True, "", "")])
-    shown = []
+    executor = FakeExecutor([ExecResult(True, "", "")] * 2)
     agent = _agent(
         client, executor,
         _settings(auto_approve_loop=True, one_feature_per_step=True))
     out = agent.send(
-        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
-        on_tool_result=lambda tool, summary, content: shown.append(content))
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None)
     assert out == "Done"
-    asks = [t for t in shown if t.startswith("[one feature per step]")]
-    assert len(asks) == 1
-    assert "2 features" in asks[0]
-    assert asks[0] in [
-        m["content"] for m in agent.messages if m["role"] == "user"]
-    assert not executor.results, "only the single-feature step ran"
+    # Batching hurts diagnosis, not the document, so it advises rather than
+    # discarding a script that may be perfectly good.
+    advisory = [str(c) for c in client.calls if "2 features" in str(c)]
+    assert advisory
+    assert not executor.results
 
 
 def test_one_feature_gate_is_off_by_default():
@@ -1429,9 +1416,10 @@ def test_identical_gate_rejection_escalates_instead_of_looping():
 
 
 def test_a_different_rejection_resets_the_repeat_counter():
+    placeholder = "for i in range(2):\n    pass\n"
     client = FakeClient([
         LLMProposal("try part", "pass", "", True, strategy="part"),
-        LLMProposal("no plan", "pass", "", True, plan=()),
+        LLMProposal("inert", placeholder, "", True),
         LLMProposal("try part", "pass", "", True, strategy="part"),
         LLMProposal("native", "pass", "", True),
         LLMProposal("", "", "Done", False, kind="finish"),
@@ -1439,7 +1427,102 @@ def test_a_different_rejection_resets_the_repeat_counter():
     shown = []
     _agent(
         client, FakeExecutor([ExecResult(True, "", "")]),
-        _settings(auto_approve_loop=True, structured_cad_planning=True)).send(
+        _settings(auto_approve_loop=True)).send(
             "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
             on_tool_result=lambda tool, summary, content: shown.append(content))
     assert not [t for t in shown if "[identical rejection repeated]" in t]
+
+
+def test_one_blocker_and_two_advisories_arrive_in_a_single_message():
+    """Objections surfaced one per round cost a script each time."""
+    script = (
+        "pad = body.newObject('PartDesign::Pad','P')\n"
+        "pk = body.newObject('PartDesign::Pocket','H')\n")
+    client = FakeClient([
+        # Blocks on strategy; also trips plan and one-feature advisories.
+        LLMProposal("do everything", script, "", True, strategy="part"),
+        LLMProposal(
+            "pad only", "pad = body.newObject('PartDesign::Pad','P')\n", "",
+            True, strategy="part_design", stage="additive",
+            plan=("Pad the plate",), plan_step=1,
+            success_criteria=("one solid",)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True, structured_cad_planning=True,
+                  one_feature_per_step=True)).send(
+            "model a hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    rejections = [t for t in shown if t.startswith("[")]
+    assert len(rejections) == 1, "every objection belongs in one message"
+    text = rejections[0]
+    assert "[Part Design required]" in text          # the blocker
+    assert "also advisory" in text
+    assert "ordered feature-level plan" in text      # advisory 1
+    assert "2 features" in text                      # advisory 2
+
+
+def test_only_three_rules_block_a_step():
+    """The blocking set: non-Part-Design, placeholder code, blocking assumption."""
+    blockers = (
+        ("part design", LLMProposal("x", "pass", "", True, strategy="part")),
+        ("placeholder", LLMProposal(
+            "x", "for i in range(2):\n    pass\n", "", True)),
+    )
+    for label, bad in blockers:
+        client = FakeClient([bad, LLMProposal("ok", "pass", "", True),
+                             LLMProposal("", "", "Done", False, kind="finish")])
+        executor = FakeExecutor([ExecResult(True, "", "")])
+        _agent(client, executor, _settings(auto_approve_loop=True)).send(
+            "make it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+        assert not executor.results, f"{label} must block execution"
+
+
+def test_advisory_only_script_runs_and_carries_its_advisories():
+    client = FakeClient([
+        LLMProposal("no plan, batched", (
+            "pad = body.newObject('PartDesign::Pad','P')\n"
+            "pk = body.newObject('PartDesign::Pocket','H')\n"), "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, structured_cad_planning=True,
+                  one_feature_per_step=True)).send(
+            "model it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+    assert not executor.results, "advisories must not withhold execution"
+    tail = str(client.calls[-1])
+    assert "[workflow advisories]" in tail
+    assert "2 features" in tail
+
+
+def test_blocking_assumption_still_stops_the_step():
+    """A low-confidence, high-consequence value would bake into every feature."""
+    risky = _assumption(confidence="low", consequence="high")
+    options = (
+        {"id": "a", "label": "68 mm", "description": "tall"},
+        {"id": "b", "label": "50 mm", "description": "short"},
+    )
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True, assumptions=(risky,)),
+        LLMProposal("", "", "", False, kind="question",
+                    question="How tall?", options=options),
+        LLMProposal("build", "pass", "", True, assumptions=(
+            _assumption(confidence="high", consequence="high",
+                        status="user_confirmed", evidence="user chose 68"),)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, assumption_ledger=True)).send(
+            "make it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+            on_question=lambda _proposal: ["a"])
+    assert out == "Done"
+    assert not executor.results
+    assert any("[assumption clarification required]" in str(c)
+               for c in client.calls)
