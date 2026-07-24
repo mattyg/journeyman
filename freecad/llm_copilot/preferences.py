@@ -154,6 +154,7 @@ class LLMCopilotPreferencesPage:
             ("viewsCheck", "Send rendered views to vision-capable models"),
             ("rollbackCheck", "Roll back changes that fail validation"),
             ("richSnapshotCheck", "Include rich type-aware document state"),
+            ("keepPartialCheck", "Keep work completed before a script error"),
         ]
         for attr, label in flags:
             widget = QtGui.QCheckBox(label)
@@ -326,6 +327,7 @@ class LLMCopilotPreferencesPage:
             (self.viewsCheck, "RenderedViews", False),
             (self.rollbackCheck, "RollbackOnValidationFailure", True),
             (self.richSnapshotCheck, "RichSnapshot", True),
+            (self.keepPartialCheck, "KeepPartialOnError", True),
             (self.edgesCheck, "TechnicalEdgeOverlay", True),
             (self.objectColorsCheck, "ColorSeparateObjects", True),
             (self.depthShadingCheck, "DepthEnhancedShading", True),

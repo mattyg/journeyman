@@ -1,6 +1,7 @@
 # tests/test_script_executor.py
 import pytest
 
+from freecad.llm_copilot import script_executor
 from freecad.llm_copilot.script_executor import (
     _annotate_traceback, assert_feature, assert_sketch_constrained)
 
@@ -192,3 +193,77 @@ def test_invalid_state_still_raises_without_recomputing():
     with pytest.raises(ValueError, match="Invalid state"):
         assert_feature(obj)
     assert obj.Document.recomputes == 0
+
+
+# --- partial work survives a raising script ---
+
+class RecordingDoc:
+    """A document that records transaction outcomes, as FreeCAD would."""
+
+    UndoMode = 1
+
+    def __init__(self):
+        self.objects = ["Sketch_OuterProfile"]
+        self.committed = self.aborted = self.recomputes = 0
+
+    def openTransaction(self, _name): pass
+    def commitTransaction(self): self.committed += 1
+    def abortTransaction(self):
+        self.aborted += 1
+        self.objects = ["Sketch_OuterProfile"]  # abort restores the deletion
+    def recompute(self): self.recomputes += 1
+    def removeObject(self, name):
+        if name in self.objects:
+            self.objects.remove(name)
+
+
+class RecordingApp:
+    def __init__(self):
+        self.ActiveDocument = RecordingDoc()
+        self.Console = type("C", (), {})()
+
+
+REPAIR_THEN_FAIL = (
+    "doc = App.ActiveDocument\n"
+    "doc.removeObject('Sketch_OuterProfile')\n"
+    "print('cleaned')\n"
+    "raise ValueError('Sketch_OuterProfile has no geometry')\n")
+
+
+def test_cleanup_survives_a_script_that_raises_afterwards():
+    """climbing-hanger-transcript-3: repair scripts erased their own repair."""
+    app = RecordingApp()
+    result = script_executor.run(app, REPAIR_THEN_FAIL)
+    assert result.ok is False
+    assert "has no geometry" in result.error
+    assert app.ActiveDocument.objects == [], "the deletion was rolled back"
+    assert app.ActiveDocument.committed == 1
+    assert app.ActiveDocument.aborted == 0
+    assert result.rolled_back is False
+    # Output written before the failure still reaches the model.
+    assert "cleaned" in result.output
+
+
+def test_opting_out_restores_the_old_rollback_behaviour():
+    app = RecordingApp()
+    result = script_executor.run(
+        app, REPAIR_THEN_FAIL, keep_partial_on_error=False)
+    assert result.ok is False
+    assert app.ActiveDocument.objects == ["Sketch_OuterProfile"]
+    assert app.ActiveDocument.aborted == 1
+    assert result.rolled_back is True
+
+
+def test_a_script_that_changes_nothing_before_raising_leaves_no_trace():
+    app = RecordingApp()
+    result = script_executor.run(app, "raise ValueError('boom')\n")
+    assert result.ok is False
+    assert app.ActiveDocument.objects == ["Sketch_OuterProfile"]
+
+
+def test_successful_script_still_commits_once():
+    app = RecordingApp()
+    result = script_executor.run(app, "print('ok')\n")
+    assert result.ok is True
+    assert app.ActiveDocument.committed == 1
+    assert app.ActiveDocument.aborted == 0

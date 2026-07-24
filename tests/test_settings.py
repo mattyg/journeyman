@@ -40,6 +40,7 @@ def test_defaults_when_unset():
     assert s.keep_script_history is False
     assert s.feature_retry_cap == 2
     assert s.one_feature_per_step is False
+    assert s.keep_partial_on_error is True
     assert s.structured_cad_planning is True
     assert s.parametric_feature_preference is True
     assert s.sketch_constraint_verification is True
@@ -154,6 +155,7 @@ def test_harness_feature_flags_roundtrip():
     settings.keep_script_history = True
     settings.feature_retry_cap = 4
     settings.one_feature_per_step = True
+    settings.keep_partial_on_error = False
     settings.structured_cad_planning = False
     settings.parametric_feature_preference = False
     settings.sketch_constraint_verification = False
@@ -182,6 +184,7 @@ def test_harness_feature_flags_roundtrip():
     assert loaded.keep_script_history is True
     assert loaded.feature_retry_cap == 4
     assert loaded.one_feature_per_step is True
+    assert loaded.keep_partial_on_error is False
     assert loaded.structured_cad_planning is False
     assert loaded.parametric_feature_preference is False
     assert loaded.sketch_constraint_verification is False

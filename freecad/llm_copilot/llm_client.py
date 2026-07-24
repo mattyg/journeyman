@@ -81,7 +81,11 @@ SYSTEM_PROMPT = (
     "assert_feature(obj, solids=None) raises a specific error unless obj built "
     "real geometry; assert_sketch_constrained(sk) raises unless a sketch is "
     "closed and fully constrained. Call them after creating a feature, so a "
-    "failure names the step that caused it."
+    "failure names the step that caused it.\n"
+    "- When a script raises part-way through, the work it completed first is "
+    "kept, not undone. Check the document snapshot before repeating earlier "
+    "steps: objects you already deleted are still gone, and features you "
+    "already built are still there."
 )
 
 _WORKFLOW_PROMPT = (

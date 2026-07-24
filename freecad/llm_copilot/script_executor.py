@@ -157,7 +157,8 @@ def assert_sketch_constrained(sketch):
     return sketch
 
 
-def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecResult":
+def run(app, script: str, validate=False, rollback_on_failure=False,
+        keep_partial_on_error=True) -> "ExecResult":
     doc = app.ActiveDocument
     if doc is None:
         return ExecResult(False, "", "NO_ACTIVE_DOCUMENT")
@@ -215,9 +216,23 @@ def run(app, script: str, validate=False, rollback_on_failure=False) -> "ExecRes
         doc.commitTransaction()
         return result(True, validation_ok=validation_ok, validation=validation)
     except Exception:
-        doc.abortTransaction()
-        return result(
-            False, _annotate_traceback(script, traceback.format_exc()))
+        error = _annotate_traceback(script, traceback.format_exc())
+        # A script that raises part-way through has usually still done work the
+        # next attempt needs — deleting a corrupt object, rebuilding a sketch,
+        # printing a diagnostic. Aborting discards all of it, so a repair script
+        # that ends in a failed assertion erases its own repair and the next
+        # attempt starts from the same broken state. Commit what was built and
+        # report the failure; policy violations and validation failures still
+        # roll back, and the user's undo stack still holds this step.
+        if not keep_partial_on_error:
+            doc.abortTransaction()
+            return result(False, error, rolled_back=True)
+        try:
+            doc.recompute()
+        except Exception:
+            pass
+        doc.commitTransaction()
+        return result(False, error)
 
 def undo(app) -> None:
     doc = app.ActiveDocument

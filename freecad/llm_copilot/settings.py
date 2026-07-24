@@ -90,6 +90,7 @@ class Settings:
     # so new fields must not shift the existing order.
     feature_retry_cap: int = 2
     one_feature_per_step: bool = False
+    keep_partial_on_error: bool = True
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -268,6 +269,8 @@ def load_settings(param_get) -> "Settings":
             1, min(10, param_get.GetInt("FeatureRetryCap", 2))),
         one_feature_per_step=param_get.GetBool(
             "OneFeaturePerStep", False),
+        keep_partial_on_error=param_get.GetBool(
+            "KeepPartialOnError", True),
         reasoning_effort=param_get.GetString("ReasoningEffort", "off"),
         enhanced_validation=param_get.GetBool("EnhancedValidation", True),
         structured_diff=param_get.GetBool("StructuredDiff", True),
@@ -316,6 +319,7 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetInt("SelfCorrectionAttempts", settings.self_correction_attempts)
     param_get.SetInt("FeatureRetryCap", settings.feature_retry_cap)
     param_get.SetBool("OneFeaturePerStep", settings.one_feature_per_step)
+    param_get.SetBool("KeepPartialOnError", settings.keep_partial_on_error)
     param_get.SetBool("EnhancedValidation", settings.enhanced_validation)
     param_get.SetBool("StructuredDiff", settings.structured_diff)
     param_get.SetBool("MandatoryVerification", settings.mandatory_verification)

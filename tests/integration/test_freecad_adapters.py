@@ -146,6 +146,52 @@ class ExecutorTests(unittest.TestCase):
         se.undo(App)  # single undo removes it
         self.assertIsNone(self.doc.getObject("B"))
 
+    def test_cleanup_survives_a_script_that_raises_afterwards(self):
+        """Work completed before an error is kept, not undone.
+
+        climbing-hanger-transcript-3 spent ~8 turns here: every repair script
+        deleted a corrupt object, rebuilt it, then failed an assertion — and
+        the abort erased the repair, so the next attempt met the same corrupt
+        state. Only the real transaction can prove this.
+        """
+        self.doc.addObject("Part::Box", "Corrupt")
+        self.doc.recompute()
+        result = se.run(App, "\n".join([
+            "doc = App.ActiveDocument",
+            "doc.removeObject('Corrupt')",
+            "doc.addObject('Part::Box', 'Rebuilt')",
+            "print('repaired')",
+            "raise ValueError('assertion failed after the repair')",
+        ]))
+        self.assertFalse(result.ok)
+        self.assertIn("assertion failed after the repair", result.error)
+        self.assertIn("repaired", result.output)
+        # The repair survived: the corrupt object is gone and the new one exists.
+        self.assertIsNone(self.doc.getObject("Corrupt"))
+        self.assertIsNotNone(self.doc.getObject("Rebuilt"))
+        self.assertFalse(result.rolled_back)
+
+    def test_opting_out_rolls_a_failed_script_back(self):
+        self.doc.addObject("Part::Box", "Keep")
+        self.doc.recompute()
+        result = se.run(App, "\n".join([
+            "App.ActiveDocument.removeObject('Keep')",
+            "raise ValueError('boom')",
+        ]), keep_partial_on_error=False)
+        self.assertFalse(result.ok)
+        self.assertTrue(result.rolled_back)
+        self.assertIsNotNone(self.doc.getObject("Keep"))
+
+    def test_partial_work_remains_undoable_by_the_user(self):
+        result = se.run(App, "\n".join([
+            "App.ActiveDocument.addObject('Part::Box', 'Half')",
+            "raise ValueError('stopped')",
+        ]))
+        self.assertFalse(result.ok)
+        self.assertIsNotNone(self.doc.getObject("Half"))
+        se.undo(App)
+        self.assertIsNone(self.doc.getObject("Half"))
+
     def test_pinned_agent_edits_owner_and_restores_visible_document(self):
         visible = App.newDocument("Visible")
         App.setActiveDocument(visible.Name)

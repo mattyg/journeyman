@@ -727,7 +727,11 @@ class Agent:
                 result = self.executor.run(
                     self.app, proposal.script,
                     validate=self.settings.enhanced_validation,
-                    rollback_on_failure=self.settings.rollback_on_validation_failure)
+                    rollback_on_failure=self.settings.rollback_on_validation_failure,
+                    # A read-only script has nothing worth rolling back, and its
+                    # output is exactly what the next attempt needs.
+                    keep_partial_on_error=(
+                        self.settings.keep_partial_on_error or diagnostic))
             except TypeError:
                 result = self.executor.run(self.app, proposal.script)
             after = self.access.state()
