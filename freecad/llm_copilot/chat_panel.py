@@ -7,7 +7,7 @@ import FreeCADGui as Gui
 
 from . import document_inspector, script_executor, llm_client
 from .agent import Agent
-from .settings import load_settings, PARAM_PATH
+from .settings import load_settings, model_display_name, PARAM_PATH
 
 class _Client:
     def complete(self, messages, settings):
