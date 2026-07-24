@@ -6,19 +6,19 @@
 # available in every workbench (toggled via View -> Panels), not a mode you
 # switch into. Settings live on a standard FreeCAD preferences page.
 
-import os
-
 import FreeCAD
 import FreeCADGui as Gui
 
-_HERE = os.path.dirname(__file__)
-_PREF_UI = os.path.join(_HERE, "Resources", "preferences", "llmcopilot.ui")
-
 
 def _register_preference_page():
-    """Add the settings page under Edit -> Preferences."""
+    """Add the settings page under Edit -> Preferences.
+
+    Uses the class-based form of addPreferencePage (as FreeCAD's own Assembly
+    and CAM workbenches do) so the page can populate its Model dropdown from a
+    live provider fetch — something a static .ui page cannot do."""
     try:
-        Gui.addPreferencePage(_PREF_UI, "LLM Copilot")
+        from freecad.llm_copilot.preferences import LLMCopilotPreferencesPage
+        Gui.addPreferencePage(LLMCopilotPreferencesPage, "LLM Copilot")
     except Exception as exc:  # never let a UI-registration hiccup abort startup
         FreeCAD.Console.PrintWarning(
             "LLM Copilot: could not register preferences page: %s\n" % exc)

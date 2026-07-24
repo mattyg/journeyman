@@ -22,14 +22,12 @@ from the prefix. Four providers are supported:
 |--------------------------------------------|------------|-----------------------------------|
 | `openai/gpt-5.4`                           | OpenAI     | OpenAI `/v1/chat/completions`     |
 | `openrouter/anthropic/claude-opus-4-8`     | OpenRouter | OpenAI-compatible                 |
-| `ollama/llama3`                            | Ollama     | OpenAI-compatible (set `ApiBase`) |
+| `ollama/llama3`                            | Ollama     | OpenAI-compatible (local host)    |
 | `anthropic/claude-opus-4-8`                | Anthropic  | native `/v1/messages`             |
 
-Anything without a recognized prefix is treated as an OpenAI-compatible
-endpoint, so other gateways work too by pointing `ApiBase` at them.
-
-For **Ollama** (local), set `ApiBase` to your server's OpenAI-compatible URL,
-e.g. `http://localhost:11434/v1`, and leave `ApiKey` empty.
+You never type a provider URL. You pick a **Provider** and a **Model** from
+dropdowns (see Configuration); the endpoint is built in. For **Ollama** (local)
+you set a **Host** instead of an API key.
 
 ## Installation
 
@@ -40,19 +38,20 @@ on any FreeCAD build, including immutable/Nix installs.
 
 ## Configuration
 
-Open **Edit -> Preferences -> LLM Copilot**. Settings are stored under the
-parameter group `BaseApp/Preferences/Mod/LLMCopilot` (the standard FreeCAD
-addon location). Available settings and their defaults:
+Open **Edit -> Preferences -> LLM Copilot**:
 
-| Setting                | Default | Meaning                                                              |
-|-------------------------|---------|------------------------------------------------------------------------|
-| `Model`                 | (empty) | Prefixed model string, e.g. `anthropic/claude-opus-4-8` (see providers above) |
-| `ApiKey`                 | (empty) | API key for the selected provider                                     |
-| `ApiBase`                | (empty) | Optional custom API base URL (e.g. for a local/self-hosted endpoint)  |
-| `ConfirmBeforeRunning`   | `true`  | Require explicit confirmation of intent before each step runs         |
-| `AutoApproveLoop`        | `false` | Allow the copilot to run multiple steps in a row without confirmation |
-| `MaxAutoApprovedSteps`   | `5`     | Cap on consecutive auto-approved steps when `AutoApproveLoop` is on    |
-| `SelfCorrectionAttempts` | `3`     | How many times the copilot retries a failed step before giving up     |
+- **Provider** — choose Anthropic, OpenAI, OpenRouter, or Ollama (local).
+- **API key** — the key for that provider (kept separately per provider, so you
+  can have keys for several at once). Hidden for Ollama.
+- **Host** (Ollama only) — your Ollama server, default `http://localhost:11434/v1`.
+- **Model** — an editable dropdown. It's filled from a short built-in list and,
+  once a key/host is set, refreshed with the provider's live model list; click
+  **Refresh** to re-pull. You can also type a model id directly.
+- **Autonomy** — *Confirm intent before running* (default on), *Auto-approve
+  consecutive steps* (default off), *Max auto-approved steps* (default 5),
+  *Self-correction attempts* (default 3).
+
+Settings are stored under `BaseApp/Preferences/Mod/LLMCopilot`.
 
 ## Manual smoke test
 

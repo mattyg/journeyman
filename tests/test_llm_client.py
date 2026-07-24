@@ -117,6 +117,60 @@ def test_anthropic_plain_text(monkeypatch):
     assert p.script == ""
 
 
+# ---- list_models ----
+
+def _patch_get(monkeypatch, response, captured):
+    def fake_get(url, headers):
+        captured["url"] = url
+        captured["headers"] = headers
+        return response
+    monkeypatch.setattr(lc, "_http_get_json", fake_get)
+
+
+def test_list_models_openai(monkeypatch):
+    captured = {}
+    _patch_get(monkeypatch, {"data": [{"id": "gpt-5.4"}, {"id": "gpt-5-mini"}]},
+               captured)
+    models = lc.list_models("openai", _settings(model="openai/x"))
+    assert models == ["gpt-5.4", "gpt-5-mini"]
+    assert captured["url"] == "https://api.openai.com/v1/models"
+    assert captured["headers"]["Authorization"] == "Bearer sk-x"
+
+
+def test_list_models_anthropic(monkeypatch):
+    captured = {}
+    _patch_get(monkeypatch, {"data": [{"id": "claude-opus-4-8"}]}, captured)
+    models = lc.list_models("anthropic", _settings(model="anthropic/x"))
+    assert models == ["claude-opus-4-8"]
+    assert captured["url"] == "https://api.anthropic.com/v1/models"
+    assert captured["headers"]["x-api-key"] == "sk-x"
+    assert captured["headers"]["anthropic-version"] == lc.ANTHROPIC_VERSION
+
+
+def test_list_models_ollama_uses_native_tags(monkeypatch):
+    captured = {}
+    _patch_get(monkeypatch, {"models": [{"name": "llama3"}, {"name": "qwen2.5"}]},
+               captured)
+    s = _settings(model="ollama/x", api_key="", api_base="http://localhost:11434/v1")
+    models = lc.list_models("ollama", s)
+    assert models == ["llama3", "qwen2.5"]
+    # native tags endpoint at host root, not under /v1
+    assert captured["url"] == "http://localhost:11434/api/tags"
+    assert "Authorization" not in captured["headers"]
+
+
+def test_list_models_raises_on_error(monkeypatch):
+    def boom(url, headers):
+        raise lc.LLMError("HTTP 401")
+    monkeypatch.setattr(lc, "_http_get_json", boom)
+    try:
+        lc.list_models("openai", _settings())
+    except lc.LLMError:
+        pass
+    else:
+        raise AssertionError("expected LLMError")
+
+
 def test_http_error_becomes_llmerror(monkeypatch):
     def boom(url, headers, payload):
         raise lc.LLMError("HTTP 401 from x: bad key")

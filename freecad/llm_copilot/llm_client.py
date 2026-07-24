@@ -108,6 +108,59 @@ def _http_post_json(url: str, headers: dict, payload: dict) -> dict:
     return json.loads(body)
 
 
+def _http_get_json(url: str, headers: dict) -> dict:
+    """GET a JSON response, using only the stdlib. Separate seam from POST so
+    tests can stub model-listing independently of completions."""
+    req = urllib.request.Request(url, method="GET")
+    for key, value in headers.items():
+        req.add_header(key, value)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            body = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")
+        except Exception:
+            pass
+        raise LLMError(f"HTTP {exc.code} from {url}: {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise LLMError(f"Could not reach {url}: {exc.reason}") from exc
+    return json.loads(body)
+
+
+def list_models(provider: str, settings: Settings) -> list:
+    """Fetch the available model ids for a provider.
+
+    Returns a list of bare model-id strings (as the provider reports them).
+    Raises LLMError on network/HTTP failure or an unexpected response shape so
+    the caller can fall back to a cached/curated list.
+    """
+    provider = (provider or "").lower()
+    if provider == "ollama":
+        # Ollama's native tags endpoint lives at the host root, not under /v1.
+        base = (settings.api_base or _base_url(settings, "ollama")).rstrip("/")
+        root = base[:-3] if base.endswith("/v1") else base
+        resp = _http_get_json(root + "/api/tags", {})
+        models = resp.get("models") or []
+        return [m.get("name", "") for m in models if m.get("name")]
+    if provider == "anthropic":
+        url = _base_url(settings, "anthropic") + "/models"
+        headers = {"anthropic-version": ANTHROPIC_VERSION}
+        if settings.api_key:
+            headers["x-api-key"] = settings.api_key
+    else:  # openai, openrouter, and any OpenAI-compatible endpoint
+        url = _base_url(settings, provider) + "/models"
+        headers = {}
+        if settings.api_key:
+            headers["Authorization"] = "Bearer " + settings.api_key
+    resp = _http_get_json(url, headers)
+    data = resp.get("data")
+    if not isinstance(data, list):
+        raise LLMError(f"Unexpected models response: {resp!r}")
+    return [item.get("id", "") for item in data if item.get("id")]
+
+
 def _split_model(model: str):
     """Return (provider, wire_model) from a possibly prefixed model string."""
     if "/" in model:
