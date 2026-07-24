@@ -807,7 +807,7 @@ def test_replica_omission_requires_explicit_question_round():
     assert not executor.results
 
 
-def test_fidelity_rejection_marks_tool_not_executed():
+def test_fidelity_rejection_shows_user_the_reason_sent_to_the_model():
     client = FakeClient([
         LLMProposal(
             "start bend", "pass", "", True,
@@ -830,10 +830,48 @@ def test_fidelity_rejection_marks_tool_not_executed():
             on_tool_result=lambda tool, summary, content:
             tool_results.append((tool, summary, content)))
     assert out == "Done"
-    assert tool_results == [(
-        "run_freecad_script", "start bend",
-        "Not executed — replica fidelity check rejected the step "
-        "before execution.")]
+    tool, summary, content = tool_results[0]
+    assert (tool, summary) == ("run_freecad_script", "start bend")
+    # The user sees the same tagged block the model was given, naming the
+    # actual objection — not a bare "rejected" note.
+    assert content.startswith("[replica fidelity required]\n")
+    assert "blocked" in content
+    # And it is byte-identical to what went into the model's history.
+    sent = [
+        message["content"] for message in client.calls[-1]
+        if message["role"] == "user"]
+    assert content in sent
+
+
+def _gate_feedback_pairs(client, executor, settings, **send_kw):
+    """Run a turn, returning (shown_to_user, sent_to_model) for gate blocks."""
+    shown = []
+    agent = _agent(client, executor, settings)
+    agent.send(
+        "do it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content:
+        shown.append(content), **send_kw)
+    sent = [
+        message["content"] for message in agent.messages
+        if message["role"] == "user"]
+    return shown, sent
+
+
+def test_every_gate_rejection_reaches_the_user_verbatim():
+    """A gate that rejects a step must never leave the transcript silent."""
+    client = FakeClient([
+        # Rejected: not part_design.
+        LLMProposal("try part", "pass", "", True, strategy="part"),
+        LLMProposal("native", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown, sent = _gate_feedback_pairs(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True))
+    gate_blocks = [text for text in shown if text.startswith("[")]
+    assert gate_blocks, "the rejected step produced no user-visible feedback"
+    for block in gate_blocks:
+        assert block in sent
 
 
 def test_part_workbench_step_is_rolled_back_and_rebuilt_natively():

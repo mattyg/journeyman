@@ -48,6 +48,90 @@ def automatic_api_reference(reference):
         + "\nUse this reference to correct the next script.")
 
 
+def _gate(tag, issues, instruction):
+    """A gate rejection: tag, the specific issues, and what to do next.
+
+    Gates reject a proposal before the document is touched. The returned string
+    is fed to the model *and* shown in the transcript verbatim, so the reason a
+    step did not run is identical in both places — see :func:`Agent.send`.
+    """
+    body = "\n".join("- " + issue for issue in issues)
+    return f"[{tag}]\n{body}\n{instruction}" if body else f"[{tag}]\n{instruction}"
+
+
+def part_design_required():
+    """The model proposed a non-Part-Design strategy."""
+    return _gate(
+        "Part Design required", (),
+        "Use strategy=part_design. Create editable geometry in a "
+        "PartDesign::Body from attached, constrained sketches and native Part "
+        "Design features. Part primitives, Part::Feature, Shape assignment, "
+        "and boolean shortcuts are not allowed.")
+
+
+def structured_plan_required(issues):
+    """The structured CAD planning fields are missing or invalid."""
+    return _gate(
+        "structured CAD plan required", issues,
+        "Submit a corrected run_freecad_script call before editing the "
+        "document.")
+
+
+def assumption_ledger_required(issues):
+    """The first script's assumption ledger is missing or invalid."""
+    return _gate(
+        "assumption ledger required", issues,
+        "Resubmit the script with a corrected ledger; the document has not "
+        "been edited.")
+
+
+def assumption_clarification_required(ids=()):
+    """Blocking (low-confidence, high-consequence) assumptions need the user."""
+    if not ids:
+        return _gate(
+            "assumption clarification required", (),
+            "Call ask_user before marking a blocking assumption as confirmed. "
+            "The script was not executed.")
+    return _gate(
+        "assumption clarification required", (),
+        f"Blocking assumption ids: {', '.join(ids)}. The script was not "
+        "executed. Use ask_user (at most three single-question calls total), "
+        "then resubmit this script with the same ids, updated values/status, "
+        "and evidence citing the user's selection.")
+
+
+def assumption_clarification_limit():
+    """The three-question clarification budget is spent."""
+    return _gate(
+        "assumption clarification limit", (),
+        "The one-round limit of three questions has been reached. Resubmit "
+        "the script with the user selections incorporated.")
+
+
+def invalid_assumption_update(issues):
+    """A later ledger update dropped rows or promoted them without evidence."""
+    return _gate(
+        "invalid assumption update", issues,
+        "Keep stable ids and provide evidence for changed values or statuses.")
+
+
+def fidelity_required(issues):
+    """The replica feature checklist is missing, regressed, or self-approved."""
+    return _gate(
+        "replica fidelity required", issues,
+        "The script was not executed. Do not simplify because a feature is "
+        "difficult; use another CAD strategy or ask_user for explicit "
+        "omission approval.")
+
+
+def part_design_violation(issues):
+    """The script ran, produced non-Part-Design geometry, and was rolled back."""
+    return _gate(
+        "Part Design violation — step rolled back", issues,
+        "Rebuild the step with a Body, attached sketch, and native Part "
+        "Design features.")
+
+
 def _diagnostics(result):
     """Shared stdout / stderr / console decoration for a run result."""
     text = ""

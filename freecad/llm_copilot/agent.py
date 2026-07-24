@@ -131,6 +131,19 @@ class Agent:
         self.view_capture = view_capture
         self.access = DocumentAccess(inspector, app, self)
 
+    def _reject(self, feedback, proposal, on_tool_result=None):
+        """Reject a proposal: tell the model and show the user the same text.
+
+        Every gate rejection routes through here so the transcript can never
+        drift from what the model was actually told. The tool result carries the
+        gate block verbatim — the bracketed tag is the only markup, and it reads
+        as a label in the UI and as protocol vocabulary to the model.
+        """
+        self.messages.append({"role": "user", "content": feedback})
+        if on_tool_result is not None:
+            on_tool_result(
+                "run_freecad_script", getattr(proposal, "intent", ""), feedback)
+
     def _handle_inspect(self, proposal, turn, on_tool_result=None):
         """Read-only inspection: run the query, feed the result back."""
         from . import turn_protocol
@@ -406,11 +419,8 @@ class Agent:
                             return summary
                         self.messages.append({
                             "role": "user",
-                            "content": (
-                                "[assumption clarification limit]\n"
-                                "The one-round limit of three questions has "
-                                "been reached. Resubmit the script with the "
-                                "user selections incorporated."),
+                            "content":
+                                turn_protocol.assumption_clarification_limit(),
                         })
                         continue
                     turn.assumption_questions += 1
@@ -443,15 +453,9 @@ class Agent:
                     self.messages.append(
                         {"role": "assistant", "content": summary})
                     return summary
-                self.messages.append({
-                    "role": "user",
-                    "content": (
-                        "[Part Design required]\nUse strategy=part_design. "
-                        "Create editable geometry in a PartDesign::Body from "
-                        "attached, constrained sketches and native Part Design "
-                        "features. Part primitives, Part::Feature, Shape "
-                        "assignment, and boolean shortcuts are not allowed."),
-                })
+                self._reject(
+                    turn_protocol.part_design_required(),
+                    proposal, on_tool_result)
                 continue
 
             if self.settings.structured_cad_planning:
@@ -465,14 +469,9 @@ class Agent:
                         self.messages.append(
                             {"role": "assistant", "content": summary})
                         return summary
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[structured CAD plan required]\n"
-                            + "\n".join("- " + issue for issue in issues)
-                            + "\nSubmit a corrected run_freecad_script call "
-                            "before editing the document."),
-                    })
+                    self._reject(
+                        turn_protocol.structured_plan_required(issues),
+                        proposal, on_tool_result)
                     continue
                 turn.planning_retries = 0
                 ledger.update({
@@ -514,40 +513,24 @@ class Agent:
                         self.messages.append(
                             {"role": "assistant", "content": summary})
                         return summary
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[assumption ledger required]\n"
-                            + "\n".join("- " + issue for issue in issues)
-                            + "\nResubmit the script with a corrected ledger; "
-                            "the document has not been edited."),
-                    })
+                    self._reject(
+                        turn_protocol.assumption_ledger_required(issues),
+                        proposal, on_tool_result)
                     continue
                 turn.ledger["assumptions"] = merged
                 blocking = cad_workflow.blocking_assumptions(merged)
                 if blocking:
                     turn.assumption_clarification = True
-                    ids = ", ".join(row["id"] for row in blocking)
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[assumption clarification required]\n"
-                            f"Blocking assumption ids: {ids}. The script was "
-                            "not executed. Use ask_user (at most three "
-                            "single-question calls total), then resubmit this "
-                            "script with the same ids, updated values/status, "
-                            "and evidence citing the user's selection."),
-                    })
+                    self._reject(
+                        turn_protocol.assumption_clarification_required(
+                            [row["id"] for row in blocking]),
+                        proposal, on_tool_result)
                     continue
                 if (turn.assumption_clarification
                         and turn.assumption_questions == 0):
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[assumption clarification required]\n"
-                            "Call ask_user before marking a blocking assumption "
-                            "as confirmed. The script was not executed."),
-                    })
+                    self._reject(
+                        turn_protocol.assumption_clarification_required(),
+                        proposal, on_tool_result)
                     continue
                 turn.assumptions_accepted = True
                 turn.assumption_clarification = False
@@ -570,14 +553,9 @@ class Agent:
                         self.messages.append(
                             {"role": "assistant", "content": summary})
                         return summary
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[invalid assumption update]\n"
-                            + "\n".join("- " + issue for issue in issues)
-                            + "\nKeep stable ids and provide evidence for "
-                            "changed values or statuses."),
-                    })
+                    self._reject(
+                        turn_protocol.invalid_assumption_update(issues),
+                        proposal, on_tool_result)
                     continue
                 turn.ledger["assumptions"] = merged
                 turn.assumption_retries = 0
@@ -610,20 +588,9 @@ class Agent:
                         self.messages.append(
                             {"role": "assistant", "content": summary})
                         return summary
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[replica fidelity required]\n"
-                            + "\n".join("- " + issue for issue in issues)
-                            + "\nThe script was not executed. Do not simplify "
-                            "because a feature is difficult; use another CAD "
-                            "strategy or ask_user for explicit omission approval."),
-                    })
-                    if on_tool_result is not None:
-                        on_tool_result(
-                            "run_freecad_script", proposal.intent,
-                            "Not executed — replica fidelity check rejected "
-                            "the step before execution.")
+                    self._reject(
+                        turn_protocol.fidelity_required(issues),
+                        proposal, on_tool_result)
                     continue
                 turn.ledger["observed_features"] = features
                 turn.fidelity_clarification = False
@@ -700,12 +667,8 @@ class Agent:
                         return summary
                     self.messages.append({
                         "role": "user",
-                        "content": (
-                            "[Part Design violation — step rolled back]\n"
-                            + "\n".join(
-                                "- " + issue for issue in part_design_issues)
-                            + "\nRebuild the step with a Body, attached sketch, "
-                            "and native Part Design features."),
+                        "content": turn_protocol.part_design_violation(
+                            part_design_issues),
                     })
                     continue
                 turn.part_design_retries = 0

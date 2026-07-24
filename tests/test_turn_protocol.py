@@ -82,3 +82,41 @@ def test_workflow_tail_renders_warnings_without_persisting_ledger():
 def test_workflow_tail_empty_when_disabled_and_no_warnings():
     settings = _settings(design_ledger_context=False)
     assert turn_protocol.workflow_tail([], {}, settings) == ""
+
+
+def test_gate_blocks_carry_tag_issues_and_instruction():
+    text = turn_protocol.fidelity_required(["hole is missing", "tab omitted"])
+    assert text.startswith("[replica fidelity required]\n")
+    assert "- hole is missing\n- tab omitted" in text
+    assert "The script was not executed." in text
+
+
+def test_gate_block_without_issues_omits_blank_bullet_section():
+    text = turn_protocol.part_design_required()
+    assert text.startswith("[Part Design required]\n")
+    assert "\n- " not in text
+
+
+def test_assumption_clarification_names_blocking_ids():
+    text = turn_protocol.assumption_clarification_required(["a1", "a2"])
+    assert "Blocking assumption ids: a1, a2." in text
+    generic = turn_protocol.assumption_clarification_required()
+    assert "Blocking assumption ids" not in generic
+    assert "Call ask_user before marking" in generic
+
+
+def test_every_gate_block_is_tagged_for_logs_and_ui():
+    blocks = (
+        turn_protocol.part_design_required(),
+        turn_protocol.structured_plan_required(["x"]),
+        turn_protocol.assumption_ledger_required(["x"]),
+        turn_protocol.assumption_clarification_required(["a1"]),
+        turn_protocol.assumption_clarification_limit(),
+        turn_protocol.invalid_assumption_update(["x"]),
+        turn_protocol.fidelity_required(["x"]),
+        turn_protocol.part_design_violation(["x"]),
+    )
+    for block in blocks:
+        assert block.startswith("[") and "]\n" in block
+        # No HTML or Markdown decoration: the same text serves model and user.
+        assert "<" not in block and "**" not in block
