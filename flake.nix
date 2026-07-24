@@ -17,8 +17,12 @@
         # Pure-Python test tier: our agent/llm_client/settings/deps modules import
         # neither FreeCAD nor Qt (and the LLM client is stdlib-only — urllib+json),
         # so plain CPython + pytest runs them with no third-party packages.
+        # pyflakes catches undefined names in the Qt modules (chat_panel,
+        # preferences) that can't be imported here (no PySide) — byte-compile
+        # alone misses those.
         pythonEnv = pkgs.python3.withPackages (ps: with ps; [
           pytest
+          pyflakes
         ]);
       in
       {
