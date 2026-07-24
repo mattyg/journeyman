@@ -12,6 +12,42 @@ class _Client:
     def complete(self, messages, settings):
         return llm_client.complete(messages, settings)
 
+
+class _MainThreadRunner(QtCore.QObject):
+    """Runs a callable on the GUI (main) thread and blocks the caller until it
+    finishes, returning its result or re-raising its exception.
+
+    FreeCAD/Qt is NOT thread-safe: executing document scripts triggers GUI
+    updates (tree view, 3D view, Sketcher solver feedback) that must happen on
+    the main thread. The LLM network call stays on a worker thread, but every
+    FreeCAD access is funneled through here. Uses a queued signal so the slot
+    runs on this object's (main) thread regardless of who calls run().
+    """
+    _invoke = QtCore.Signal(object)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._invoke.connect(self._run_slot, QtCore.Qt.QueuedConnection)
+
+    def _run_slot(self, box):
+        try:
+            box["result"] = box["fn"]()
+        except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
+            box["error"] = exc
+        finally:
+            box["done"].set()
+
+    def run(self, fn):
+        # Fast path: already on the GUI thread — call directly (e.g. undo button).
+        if QtCore.QThread.currentThread() is self.thread():
+            return fn()
+        box = {"fn": fn, "done": threading.Event(), "result": None, "error": None}
+        self._invoke.emit(box)
+        box["done"].wait()
+        if box["error"] is not None:
+            raise box["error"]
+        return box["result"]
+
 class CopilotDockWidget(QtGui.QDockWidget):
     # Append a line to the log (worker -> GUI thread; Qt queues cross-thread).
     resultReady = QtCore.Signal(str)
@@ -46,6 +82,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.intentAsked.connect(self._ask_intent, QtCore.Qt.QueuedConnection)
         self.busyChanged.connect(self._set_busy, QtCore.Qt.QueuedConnection)
         self._busy = False
+        # Marshals every FreeCAD access to the main thread (FreeCAD/Qt is not
+        # thread-safe; running document scripts off-thread corrupts the GUI).
+        self._main = _MainThreadRunner(self)
         # Route client diagnostics to the FreeCAD report view so a "no response"
         # can be traced (e.g. model replied with text instead of a tool call).
         llm_client.DEBUG_LOG = lambda m: FreeCAD.Console.PrintMessage(
@@ -54,9 +93,22 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _build_agent(self):
         settings = load_settings(FreeCAD.ParamGet(PARAM_PATH))
+        main = self._main
+
+        # Wrap FreeCAD-touching calls so they run on the main thread even though
+        # the agent loop runs on a worker thread.
+        def inspector(app):
+            return main.run(lambda: document_inspector.snapshot(app))
+
+        class _MarshalledExecutor:
+            def run(self, app, script):
+                return main.run(lambda: script_executor.run(app, script))
+            def undo(self, app):
+                return main.run(lambda: script_executor.undo(app))
+
         self.agent = Agent(client=_Client(),
-                           inspector=document_inspector.snapshot,
-                           executor=script_executor,
+                           inspector=inspector,
+                           executor=_MarshalledExecutor(),
                            app=FreeCAD, settings=settings)
 
     def _append(self, text):
