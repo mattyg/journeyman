@@ -5,6 +5,36 @@ class AgentCancelled(Exception):
     """Raised when the user cancels an in-progress agent turn."""
 
 
+# Control signals a proposal handler returns to the dispatch loop.
+# LOOP  -> the handler consumed the proposal; ask the model again.
+# a str -> end the turn now, returning that text to the user.
+# EXECUTE -> not a special proposal kind; fall through to run the script.
+LOOP = ("loop",)
+EXECUTE = ("execute",)
+
+
+class _Turn:
+    """Mutable per-turn state threaded through the proposal handlers.
+
+    Bundles what used to be a handful of loose locals in ``Agent.send`` so each
+    handler can read and advance them without a long parameter list. The
+    handlers own the retry policy for their own proposal kind; the dispatch loop
+    only routes.
+    """
+
+    def __init__(self):
+        self.executed_steps = 0
+        self.retries = 0
+        self.planning_retries = 0
+        self.completion_retries = 0
+        self.question_retries = 0
+        self.ledger = {
+            "strategy": "", "stage": "analyze", "plan": (),
+            "success_criteria": (), "completed_stages": set(),
+            "completed_steps": 0, "warnings": (),
+        }
+
+
 class Agent:
     def __init__(self, client, inspector, executor, app, settings,
                  view_capture=None):
@@ -42,10 +72,148 @@ class Agent:
         return (reader(self.app, query, module, symbol) if reader
                 else api_reference.lookup(self.app, query, module, symbol))
 
+    def _handle_inspect(self, proposal, turn):
+        """Read-only inspection: run the query, feed the result back."""
+        from . import turn_protocol
+        inspected = self._inspect(proposal.query)
+        verification_inspection = (
+            bool(turn.executed_steps) and self.settings.final_design_review)
+        if verification_inspection:
+            turn.ledger["stage"] = "verify"
+            turn.ledger["completed_stages"].add("verify")
+        self.messages.append({
+            "role": "assistant",
+            "content": f"(read-only inspection) {proposal.query}"})
+        self.messages.append({
+            "role": "user",
+            "content": turn_protocol.inspection_result(
+                inspected, verify_stage=verification_inspection)})
+        return LOOP
+
+    def _handle_question(self, proposal, turn, on_question, check_cancelled):
+        """Structured clarification: validate, ask the user, feed the choice back."""
+        if (not proposal.question or len(proposal.options) < 2
+                or on_question is None):
+            turn.question_retries += 1
+            if turn.question_retries > max(
+                    1, self.settings.self_correction_attempts):
+                summary = (
+                    "I couldn't construct a valid question for the "
+                    "clarification I need.")
+                self.messages.append(
+                    {"role": "assistant", "content": summary})
+                return summary
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    "[invalid ask_user call]\nProvide a concise question "
+                    "with 2–5 options, each having an id, label, and "
+                    "description."),
+            })
+            return LOOP
+        turn.question_retries = 0
+        option_lines = [
+            f"- {option['id']}: {option['label']} — "
+            f"{option['description']}"
+            for option in proposal.options]
+        self.messages.append({
+            "role": "assistant",
+            "content": (
+                "(question) " + proposal.question + "\n"
+                + "\n".join(option_lines)),
+        })
+        selected = on_question(proposal)
+        check_cancelled()
+        selected = list(selected or [])
+        selected_options = [
+            option for option in proposal.options
+            if option["id"] in selected]
+        if not selected_options:
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    "[no option selected]\nAsk the question again with "
+                    "clear, applicable choices."),
+            })
+            return LOOP
+        if not proposal.allow_multiple:
+            selected_options = selected_options[:1]
+        self.messages.append({
+            "role": "user",
+            "content": (
+                "[user selection]\n"
+                + "\n".join(
+                    f"{option['id']}: {option['label']}"
+                    for option in selected_options)),
+        })
+        return LOOP
+
+    def _handle_api_lookup(self, proposal, turn):
+        """FreeCAD API reference lookup requested by the model."""
+        from . import turn_protocol
+        reference = self._api_lookup(
+            proposal.api_query, proposal.api_module, proposal.api_symbol)
+        self.messages.append({
+            "role": "assistant",
+            "content": (
+                f"(FreeCAD API lookup) {proposal.api_module}."
+                f"{proposal.api_symbol}\n{proposal.api_query}"),
+        })
+        self.messages.append({
+            "role": "user",
+            "content": turn_protocol.api_reference(reference),
+        })
+        return LOOP
+
+    def _handle_completion(self, proposal, turn):
+        """A finish/plain response: enforce final verification, else end the turn."""
+        verification_missing = (
+            self.settings.mandatory_verification and turn.executed_steps
+            and (not proposal.verified or not proposal.evidence))
+        review_missing = (
+            self.settings.final_design_review and turn.executed_steps
+            and not proposal.reviewed_plan)
+        if verification_missing or review_missing:
+            turn.completion_retries += 1
+            # A schema-conforming model normally fixes this in one
+            # response. Do not burn tokens repeatedly calling finish.
+            if turn.completion_retries > 1:
+                summary = (
+                    "I couldn't complete the required final review "
+                    "after several attempts. The model must verify the "
+                    "finished document and provide concrete evidence "
+                    "before this task can be marked complete.")
+                self.messages.append(
+                    {"role": "assistant", "content": summary})
+                return summary
+            requirements = []
+            if verification_missing:
+                requirements.append(
+                    "set verified=true and cite concrete evidence")
+            if review_missing:
+                requirements.append(
+                    "compare every plan step and success criterion with "
+                    "the finished model, then set reviewed_plan=true")
+            markers = []
+            if verification_missing:
+                markers.append("[verification required]")
+            if review_missing:
+                markers.append("[design review required]")
+            self.messages.append({
+                "role": "user",
+                "content": (
+                    " ".join(markers) + "\nReview the feature tree, "
+                    "measurements, validation, diff, and rendered "
+                    "evidence; " + "; ".join(requirements)
+                    + ". Correct the model if any check fails.")})
+            return LOOP
+        self.messages.append({"role": "assistant", "content": proposal.text})
+        return proposal.text
+
     def send(self, user_message, on_intent, on_result, on_reasoning=None,
              on_context=None, user_images=None, cancel_event=None,
              on_question=None, on_timeout=None) -> str:
-        from . import document_inspector, cad_workflow
+        from . import cad_workflow, turn_protocol
         from .llm_client import LLMTimeoutError
 
         def check_cancelled():
@@ -58,8 +226,7 @@ class Agent:
         include_system_context = context_cursor == 0
         check_cancelled()
         snap = self._snapshot()
-        request_text = (
-            f"[document snapshot]\n{snap}\n\n[request]\n{user_message}")
+        request_text = turn_protocol.request(snap, user_message)
         if user_images:
             content = [{"type": "text", "text": request_text}]
             for image in user_images:
@@ -73,16 +240,8 @@ class Agent:
         else:
             content = request_text
         self.messages.append({"role": "user", "content": content})
-        executed_steps = 0
-        retries = 0
-        planning_retries = 0
-        completion_retries = 0
-        question_retries = 0
-        ledger = {
-            "strategy": "", "stage": "analyze", "plan": (),
-            "success_criteria": (), "completed_stages": set(),
-            "completed_steps": 0, "warnings": (),
-        }
+        turn = _Turn()
+        ledger = turn.ledger
         while True:
             check_cancelled()
             if on_context is not None and context_cursor < len(self.messages):
@@ -118,147 +277,32 @@ class Agent:
             if reasoning and on_reasoning is not None:
                 on_reasoning(reasoning)
             if proposal.kind == "inspect" and self.settings.read_only_inspection:
-                inspected = self._inspect(proposal.query)
-                verification_inspection = (
-                    bool(executed_steps) and self.settings.final_design_review)
-                if verification_inspection:
-                    ledger["stage"] = "verify"
-                    ledger["completed_stages"].add("verify")
-                self.messages.append({
-                    "role": "assistant",
-                    "content": f"(read-only inspection) {proposal.query}"})
-                self.messages.append({
-                    "role": "user",
-                    "content": (
-                        ("[verify-stage inspection result]\n"
-                         if verification_inspection else
-                         "[inspection result]\n")
-                        + inspected)})
+                self._handle_inspect(proposal, turn)
                 continue
             if proposal.kind == "question":
-                if (not proposal.question or len(proposal.options) < 2
-                        or on_question is None):
-                    question_retries += 1
-                    if question_retries > max(
-                            1, self.settings.self_correction_attempts):
-                        summary = (
-                            "I couldn't construct a valid question for the "
-                            "clarification I need.")
-                        self.messages.append(
-                            {"role": "assistant", "content": summary})
-                        return summary
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[invalid ask_user call]\nProvide a concise question "
-                            "with 2–5 options, each having an id, label, and "
-                            "description."),
-                    })
+                signal = self._handle_question(
+                    proposal, turn, on_question, check_cancelled)
+                if signal is LOOP:
                     continue
-                question_retries = 0
-                option_lines = [
-                    f"- {option['id']}: {option['label']} — "
-                    f"{option['description']}"
-                    for option in proposal.options]
-                self.messages.append({
-                    "role": "assistant",
-                    "content": (
-                        "(question) " + proposal.question + "\n"
-                        + "\n".join(option_lines)),
-                })
-                selected = on_question(proposal)
-                check_cancelled()
-                selected = list(selected or [])
-                selected_options = [
-                    option for option in proposal.options
-                    if option["id"] in selected]
-                if not selected_options:
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            "[no option selected]\nAsk the question again with "
-                            "clear, applicable choices."),
-                    })
-                    continue
-                if not proposal.allow_multiple:
-                    selected_options = selected_options[:1]
-                self.messages.append({
-                    "role": "user",
-                    "content": (
-                        "[user selection]\n"
-                        + "\n".join(
-                            f"{option['id']}: {option['label']}"
-                            for option in selected_options)),
-                })
-                continue
+                return signal
             if (proposal.kind == "api_lookup"
                     and self.settings.freecad_api_lookup):
-                reference = self._api_lookup(
-                    proposal.api_query, proposal.api_module,
-                    proposal.api_symbol)
-                self.messages.append({
-                    "role": "assistant",
-                    "content": (
-                        f"(FreeCAD API lookup) {proposal.api_module}."
-                        f"{proposal.api_symbol}\n{proposal.api_query}"),
-                })
-                self.messages.append({
-                    "role": "user",
-                    "content": "[installed-version API reference]\n" + reference,
-                })
+                self._handle_api_lookup(proposal, turn)
                 continue
             # A finish (or any non-script response) ends the turn; its text is
             # the message shown to the user. The model can't leak a script here
             # because tool_choice forces it to pick run_freecad_script for work.
             if not proposal.is_tool_call:
-                verification_missing = (
-                    self.settings.mandatory_verification and executed_steps
-                    and (not proposal.verified or not proposal.evidence))
-                review_missing = (
-                    self.settings.final_design_review and executed_steps
-                    and not proposal.reviewed_plan)
-                if verification_missing or review_missing:
-                    completion_retries += 1
-                    # A schema-conforming model normally fixes this in one
-                    # response. Do not burn tokens repeatedly calling finish.
-                    if completion_retries > 1:
-                        summary = (
-                            "I couldn't complete the required final review "
-                            "after several attempts. The model must verify the "
-                            "finished document and provide concrete evidence "
-                            "before this task can be marked complete.")
-                        self.messages.append(
-                            {"role": "assistant", "content": summary})
-                        return summary
-                    requirements = []
-                    if verification_missing:
-                        requirements.append(
-                            "set verified=true and cite concrete evidence")
-                    if review_missing:
-                        requirements.append(
-                            "compare every plan step and success criterion with "
-                            "the finished model, then set reviewed_plan=true")
-                    markers = []
-                    if verification_missing:
-                        markers.append("[verification required]")
-                    if review_missing:
-                        markers.append("[design review required]")
-                    self.messages.append({
-                        "role": "user",
-                        "content": (
-                            " ".join(markers) + "\nReview the feature tree, "
-                            "measurements, validation, diff, and rendered "
-                            "evidence; " + "; ".join(requirements)
-                            + ". Correct the model if any check fails.")})
+                signal = self._handle_completion(proposal, turn)
+                if signal is LOOP:
                     continue
-                self.messages.append({"role": "assistant", "content": proposal.text})
-                return proposal.text
+                return signal
 
             if self.settings.structured_cad_planning:
                 issues = cad_workflow.proposal_issues(proposal)
                 if issues:
-                    planning_retries += 1
-                    if planning_retries > self.settings.self_correction_attempts:
+                    turn.planning_retries += 1
+                    if turn.planning_retries > self.settings.self_correction_attempts:
                         summary = (
                             "I couldn't produce a complete CAD design plan: "
                             + "; ".join(issues) + ".")
@@ -274,7 +318,7 @@ class Agent:
                             "before editing the document."),
                     })
                     continue
-                planning_retries = 0
+                turn.planning_retries = 0
                 ledger.update({
                     "strategy": proposal.strategy,
                     "stage": proposal.stage,
@@ -345,38 +389,14 @@ class Agent:
 
             validation_ok = getattr(result, "validation_ok", True)
             if result.ok and validation_ok:
-                executed_steps += 1
-                retries = 0
-                output = getattr(result, "output", "") or ""
-                out_block = f"[script output]\n{output}\n" if output.strip() else ""
-                feedback = f"[executed OK]\n{out_block}"
-                stderr = getattr(result, "stderr", "") or ""
-                warnings = getattr(result, "console_warnings", "") or ""
-                console_errors = getattr(result, "console_errors", "") or ""
-                if stderr.strip():
-                    feedback += f"[standard error]\n{stderr}\n"
-                if warnings.strip():
-                    feedback += f"[FreeCAD console warnings]\n{warnings}\n"
-                if console_errors.strip():
-                    feedback += (
-                        f"[FreeCAD console errors]\n{console_errors}\n"
-                        "Investigate these errors even if the Python script "
-                        "returned successfully.\n")
+                turn.executed_steps += 1
+                turn.retries = 0
                 from .view_capture import changed_object_names
                 changed_names = changed_object_names(before, after)
-                if changed_names:
-                    validation = getattr(result, "validation", "")
-                    if self.settings.enhanced_validation:
-                        feedback += f"[validation]\n{validation}\n"
-                    if self.settings.structured_diff:
-                        feedback += (
-                            "[document diff]\n"
-                            + document_inspector.structured_diff(before, after)
-                            + "\n")
-                    feedback += f"[new snapshot]\n{new_snap}"
-                else:
-                    feedback += "[document unchanged]\n"
-                workflow_warnings = cad_workflow.review_step(
+                feedback = turn_protocol.execution_body(
+                    result, before, after, new_snap, changed_names,
+                    self.settings)
+                workflow_warnings = turn_protocol.review_step(
                     before, after, proposal, self.settings)
                 if proposal.stage:
                     ledger["completed_stages"].add(proposal.stage)
@@ -386,15 +406,8 @@ class Agent:
                         max(ledger.get("completed_steps", 0),
                             proposal.plan_step))
                 ledger["warnings"] = tuple(workflow_warnings)
-                if workflow_warnings:
-                    feedback += (
-                        "\n[CAD workflow review]\n"
-                        + "\n".join("- " + warning
-                                    for warning in workflow_warnings)
-                        + "\nResolve these warnings or explicitly verify why "
-                        "the current construction is intentional.\n")
-                if self.settings.design_ledger_context:
-                    feedback += "\n" + cad_workflow.ledger_text(ledger) + "\n"
+                feedback += turn_protocol.workflow_tail(
+                    workflow_warnings, ledger, self.settings)
                 self.messages.append({
                     "role": "user",
                     "content": feedback,
@@ -431,7 +444,7 @@ class Agent:
                                     "url": "data:image/png;base64," + data},
                             })
                         self.messages.append({"role": "user", "content": content})
-                if executed_steps >= self.settings.max_auto_approved_steps:
+                if turn.executed_steps >= self.settings.max_auto_approved_steps:
                     summary = ("Paused after reaching the step limit "
                                f"({self.settings.max_auto_approved_steps}). "
                                "Tell me to continue if this looks right.")
@@ -440,36 +453,15 @@ class Agent:
                 continue
 
             # error path
-            retries += 1
-            if retries >= self.settings.self_correction_attempts:
+            turn.retries += 1
+            if turn.retries >= self.settings.self_correction_attempts:
                 summary = ("I couldn't complete this after "
-                           f"{retries} attempts. Last error:\n{result.error}")
+                           f"{turn.retries} attempts. Last error:\n{result.error}")
                 self.messages.append({"role": "assistant", "content": summary})
                 return summary
-            output = getattr(result, "output", "") or ""
-            out_block = f"[script output]\n{output}\n" if output.strip() else ""
-            stderr = getattr(result, "stderr", "") or ""
-            stderr_block = (
-                f"[standard error]\n{stderr}\n" if stderr.strip() else "")
-            warnings = getattr(result, "console_warnings", "") or ""
-            warning_block = (
-                f"[FreeCAD console warnings]\n{warnings}\n"
-                if warnings.strip() else "")
-            console_errors = getattr(result, "console_errors", "") or ""
-            console_error_block = (
-                f"[FreeCAD console errors]\n{console_errors}\n"
-                if console_errors.strip() else "")
-            validation = getattr(result, "validation", "")
-            validation_block = (
-                f"[validation failed]\n{validation}\n" if validation else "")
             self.messages.append({
                 "role": "user",
-                "content": (f"[script failed]\n{out_block}{stderr_block}"
-                            f"{warning_block}{console_error_block}"
-                            f"{result.error}\n"
-                            f"{validation_block}"
-                            "Fix the script and call the run_freecad_script tool "
-                            "again — do not reply in plain text."),
+                "content": turn_protocol.failure_feedback(result),
             })
             if (self.settings.freecad_api_lookup
                     and any(marker in result.error for marker in (
@@ -485,8 +477,5 @@ class Agent:
                     module, "")
                 self.messages.append({
                     "role": "user",
-                    "content": (
-                        "[automatic installed-version API lookup]\n"
-                        + reference
-                        + "\nUse this reference to correct the next script."),
+                    "content": turn_protocol.automatic_api_reference(reference),
                 })

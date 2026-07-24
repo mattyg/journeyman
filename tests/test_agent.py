@@ -468,3 +468,43 @@ def test_user_images_are_sent_in_initial_multimodal_message():
     assert content[1] == {"type": "text",
                           "text": "User attachment: part.png"}
     assert content[2]["image_url"]["url"].endswith("YWJj")
+
+
+# --- Direct handler tests (seams exposed by extracting Agent.send) ---------
+from freecad.llm_copilot.agent import _Turn, LOOP
+
+
+def _bare_agent(settings):
+    return _agent(FakeClient([]), FakeExecutor([]), settings)
+
+
+def test_handle_completion_gates_on_missing_verification():
+    agent = _bare_agent(_settings(mandatory_verification=True))
+    turn = _Turn()
+    turn.executed_steps = 1
+    proposal = LLMProposal("", "", "all done", False, verified=False)
+    signal = agent._handle_completion(proposal, turn)
+    assert signal is LOOP
+    assert turn.completion_retries == 1
+    assert "[verification required]" in str(agent.messages[-1])
+
+
+def test_handle_completion_returns_text_when_satisfied():
+    agent = _bare_agent(_settings(mandatory_verification=False))
+    turn = _Turn()
+    turn.executed_steps = 1
+    proposal = LLMProposal("", "", "all done", False)
+    assert agent._handle_completion(proposal, turn) == "all done"
+
+
+def test_handle_question_rejects_too_few_options():
+    agent = _bare_agent(_settings())
+    turn = _Turn()
+    proposal = LLMProposal(
+        "", "", "", False, kind="question", question="Which?",
+        options=({"id": "a", "label": "A", "description": ""},))
+    signal = agent._handle_question(
+        proposal, turn, on_question=lambda p: [], check_cancelled=lambda: None)
+    assert signal is LOOP
+    assert turn.question_retries == 1
+    assert "[invalid ask_user call]" in str(agent.messages[-1])
