@@ -1,21 +1,5 @@
 # freecad/llm_copilot/agent.py
 
-# Max times per request we re-prompt a model that replied with a script in prose
-# instead of calling the tool, before giving up and accepting the text.
-_MAX_NUDGES = 2
-
-# Markers that a plain-text reply is really an attempt to run code (so we should
-# nudge the model to use the tool rather than accept it as a finished answer).
-_ACTION_MARKERS = ("(script)", "(intent)", "doc.", "App.ActiveDocument",
-                   "addObject", "```")
-
-
-def _looks_like_action(text: str) -> bool:
-    if not text:
-        return False
-    low = text.lower()
-    return any(m.lower() in low for m in _ACTION_MARKERS)
-
 
 class Agent:
     def __init__(self, client, inspector, executor, app, settings):
@@ -34,28 +18,15 @@ class Agent:
         })
         executed_steps = 0
         retries = 0
-        nudges = 0
         while True:
             proposal = self.client.complete(self.messages, self.settings)
             reasoning = getattr(proposal, "reasoning", "")
             if reasoning and on_reasoning is not None:
                 on_reasoning(reasoning)
+            # A finish (or any non-script response) ends the turn; its text is
+            # the message shown to the user. The model can't leak a script here
+            # because tool_choice forces it to pick run_freecad_script for work.
             if not proposal.is_tool_call:
-                # Some providers/models describe a script in prose instead of
-                # calling the tool. If the "final" text looks like it's trying to
-                # act (contains a script/intent block or code), nudge it back to
-                # the tool rather than accepting it as a finished answer.
-                if nudges < _MAX_NUDGES and _looks_like_action(proposal.text):
-                    nudges += 1
-                    self.messages.append(
-                        {"role": "assistant", "content": proposal.text})
-                    self.messages.append({
-                        "role": "user",
-                        "content": ("Do not describe scripts in plain text. To run "
-                                    "that code, call the run_freecad_script tool "
-                                    "with `intent` and `script`."),
-                    })
-                    continue
                 self.messages.append({"role": "assistant", "content": proposal.text})
                 return proposal.text
 

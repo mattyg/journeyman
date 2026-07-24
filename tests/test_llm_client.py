@@ -46,6 +46,26 @@ def test_openai_parses_tool_call(monkeypatch):
     assert captured["url"] == "https://api.openai.com/v1/chat/completions"
 
 
+def test_openai_forces_tool_choice(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch,
+                _openai_response({"intent": "x", "script": "pass"}), captured)
+    lc.complete([{"role": "user", "content": "box"}], _settings())
+    assert captured["payload"]["tool_choice"] == "required"
+
+
+def test_openai_parses_finish_tool(monkeypatch):
+    captured = {}
+    resp = {"choices": [{"message": {"content": None, "tool_calls": [{
+        "function": {"name": "finish",
+                     "arguments": json.dumps({"summary": "All done."})}}]}}]}
+    _patch_http(monkeypatch, resp, captured)
+    p = lc.complete([{"role": "user", "content": "x"}], _settings())
+    assert p.is_tool_call is False
+    assert p.kind == "finish"
+    assert p.text == "All done."
+
+
 def test_openai_plain_text_when_no_tool_call(monkeypatch):
     captured = {}
     _patch_http(monkeypatch, _openai_response(None, "Looks good!"), captured)
@@ -150,6 +170,40 @@ def test_anthropic_captures_thinking_and_sends_config(monkeypatch):
     assert p.reasoning == "considering the plate shape"
     assert captured["payload"]["thinking"]["type"] == "adaptive"
     assert captured["payload"]["output_config"]["effort"] == "medium"
+
+
+def test_anthropic_forces_tool_when_no_thinking(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "tool_use", "name": "run_freecad_script",
+         "input": {"intent": "x", "script": "pass"}}]), captured)
+    lc.complete([{"role": "user", "content": "x"}],
+                _settings(model="anthropic/claude-opus-4-8"))  # effort off
+    assert captured["payload"]["tool_choice"] == {"type": "any"}
+
+
+def test_anthropic_no_forced_tool_with_thinking(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "tool_use", "name": "run_freecad_script",
+         "input": {"intent": "x", "script": "pass"}}]), captured)
+    lc.complete([{"role": "user", "content": "x"}],
+                _settings(model="anthropic/claude-opus-4-8",
+                          reasoning_effort="high"))
+    # thinking + forced tool_choice are incompatible on Anthropic
+    assert "tool_choice" not in captured["payload"]
+
+
+def test_anthropic_parses_finish_tool(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "tool_use", "name": "finish",
+         "input": {"summary": "Finished."}}]), captured)
+    p = lc.complete([{"role": "user", "content": "x"}],
+                    _settings(model="anthropic/claude-opus-4-8"))
+    assert p.is_tool_call is False
+    assert p.kind == "finish"
+    assert p.text == "Finished."
 
 
 def test_anthropic_plain_text(monkeypatch):

@@ -111,27 +111,14 @@ def test_script_output_fed_back_to_model():
     # the second complete() call sees the printed output in the history
     assert any("Vertex 0 (1.0, 2.0)" in str(m) for m in client.calls[-1])
 
-def test_prose_script_nudged_back_to_tool():
-    # model replies with a script in prose (no tool call); agent should nudge it
-    # to use the tool instead of accepting it as the final answer
+def test_finish_ends_turn_with_summary():
+    # a finish proposal (is_tool_call False, kind "finish") ends the turn and its
+    # text is the reply; a script step runs first
     client = FakeClient([
-        LLMProposal("", "", "(intent) make box\n(script)\ndoc.addObject(...)", False),
         LLMProposal("make box", "pass", "", True),
-        LLMProposal("", "", "Done.", False),
+        LLMProposal("", "", "Added the box — looks right?", False, kind="finish"),
     ])
     ex = FakeExecutor([ExecResult(True, "", "")])
     out = _agent(client, ex, _settings(auto_approve_loop=True)).send(
         "box", on_intent=lambda i: True, on_result=lambda r, s: None)
-    assert out == "Done."
-    assert any("run_freecad_script tool" in str(m) for m in client.calls[-1])
-
-def test_prose_nudge_is_bounded():
-    # if the model keeps replying in prose, the agent gives up after the cap
-    props = [LLMProposal("", "", "(script) doc.addObject(...)", False)
-             for _ in range(10)]
-    client = FakeClient(props)
-    ex = FakeExecutor([])
-    out = _agent(client, ex, _settings()).send(
-        "box", on_intent=lambda i: True, on_result=lambda r, s: None)
-    # eventually returns the prose rather than looping forever
-    assert "script" in out.lower()
+    assert out == "Added the box — looks right?"

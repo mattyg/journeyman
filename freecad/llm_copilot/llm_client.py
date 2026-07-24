@@ -23,16 +23,19 @@ SYSTEM_PROMPT = (
     "You are a CAD copilot operating inside FreeCAD. You receive a text snapshot "
     "of the active document before each turn.\n"
     "\n"
-    "ALWAYS make geometry changes by calling the run_freecad_script tool with "
-    "(1) `intent`: one plain-language sentence a non-programmer designer will "
-    "read, and (2) `script`: FreeCAD Python run against App.ActiveDocument. "
-    "NEVER write code, a script, or a plan in a plain-text reply — code only ever "
-    "goes in the tool's `script` argument. Reply with plain text ONLY when the "
-    "whole task is finished and no further script is needed, or to ask the user a "
-    "genuine question. If a previous script errored, FIX IT AND CALL THE TOOL "
-    "AGAIN — do not describe the fix in prose.\n"
+    "You have exactly two tools and MUST call one on every turn (you cannot reply "
+    "with free text):\n"
+    "- run_freecad_script(intent, script): do work. `intent` is one plain-language "
+    "sentence a non-programmer will read; `script` is FreeCAD Python run against "
+    "App.ActiveDocument. ALL code — including diagnostics — goes here.\n"
+    "- finish(summary): call this ONLY when the whole task is complete, or to ask "
+    "the user a question. `summary` is the message shown to the user.\n"
     "\n"
-    "To inspect the model, call the tool with a script that uses print(); its "
+    "If a previous script errored, FIX IT and call run_freecad_script again — do "
+    "NOT call finish to describe the fix. Keep calling run_freecad_script until the "
+    "geometry is actually done, then call finish once.\n"
+    "\n"
+    "To inspect the model, call run_freecad_script with a script that uses print(); its "
     "stdout is returned to you as [script output] on the next turn, so you can "
     "check values (vertices, isClosed, validity) and then act on what you see. "
     "Diagnostic scripts go through the tool too — never paste them as plain text.\n"
@@ -56,8 +59,9 @@ SYSTEM_PROMPT = (
     "MAY call doc.recompute() when a feature needs recomputing to proceed."
 )
 
-# Provider-neutral description of the one tool the model may call. The two
-# adapters translate this into each provider's own tool-definition shape.
+# The model always calls exactly one of two tools (tool_choice is forced), so it
+# can never emit a free-text reply — which structurally prevents scripts from
+# leaking into prose. run_freecad_script = do work; finish = the turn is done.
 _TOOL_NAME = "run_freecad_script"
 _TOOL_DESCRIPTION = "Execute FreeCAD Python against the active document."
 _TOOL_PARAMETERS = {
@@ -71,22 +75,37 @@ _TOOL_PARAMETERS = {
     "required": ["intent", "script"],
 }
 
-# OpenAI-format tool schema.
-TOOL_SCHEMA = [{
-    "type": "function",
-    "function": {
-        "name": _TOOL_NAME,
-        "description": _TOOL_DESCRIPTION,
-        "parameters": _TOOL_PARAMETERS,
+_FINISH_NAME = "finish"
+_FINISH_DESCRIPTION = (
+    "Call this ONLY when the whole task is complete (or to ask the user a "
+    "question). Its `summary` is shown to the user as your reply. Do NOT put any "
+    "code here — all code goes to run_freecad_script.")
+_FINISH_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string",
+                    "description": "Plain-language message to the user."},
     },
-}]
+    "required": ["summary"],
+}
+
+# OpenAI-format tool schema (both tools).
+TOOL_SCHEMA = [
+    {"type": "function", "function": {
+        "name": _TOOL_NAME, "description": _TOOL_DESCRIPTION,
+        "parameters": _TOOL_PARAMETERS}},
+    {"type": "function", "function": {
+        "name": _FINISH_NAME, "description": _FINISH_DESCRIPTION,
+        "parameters": _FINISH_PARAMETERS}},
+]
 
 # Anthropic-format tool schema (input_schema instead of parameters).
-ANTHROPIC_TOOL_SCHEMA = [{
-    "name": _TOOL_NAME,
-    "description": _TOOL_DESCRIPTION,
-    "input_schema": _TOOL_PARAMETERS,
-}]
+ANTHROPIC_TOOL_SCHEMA = [
+    {"name": _TOOL_NAME, "description": _TOOL_DESCRIPTION,
+     "input_schema": _TOOL_PARAMETERS},
+    {"name": _FINISH_NAME, "description": _FINISH_DESCRIPTION,
+     "input_schema": _FINISH_PARAMETERS},
+]
 
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 4096
@@ -108,8 +127,13 @@ class LLMProposal:
     intent: str
     script: str
     text: str
-    is_tool_call: bool
-    reasoning: str = ""   # model's thinking/reasoning, if the provider exposed it
+    is_tool_call: bool          # True for a run_freecad_script call
+    reasoning: str = ""         # model's thinking, if the provider exposed it
+    kind: str = "script"        # "script" (run_freecad_script) | "finish"
+
+    @property
+    def is_finish(self) -> bool:
+        return self.kind == "finish"
 
 
 # Which providers expose a reasoning-effort knob (drives the Preferences UI).
@@ -274,6 +298,8 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
         "model": wire_model,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
         "tools": TOOL_SCHEMA,
+        # Force a tool call so the model can't reply in free text (no prose leaks).
+        "tool_choice": "required",
     }
     effort = getattr(settings, "reasoning_effort", "off")
     if effort and effort != "off":
@@ -285,18 +311,29 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"Unexpected response shape: {resp!r}") from exc
     reasoning = _openai_reasoning(message)
-    tool_calls = message.get("tool_calls")
-    if tool_calls:
-        args = json.loads(tool_calls[0]["function"]["arguments"])
-        _debug("openai: tool_call run_freecad_script")
-        return LLMProposal(intent=args.get("intent", ""),
-                           script=args.get("script", ""),
-                           text=message.get("content") or "",
-                           is_tool_call=True, reasoning=reasoning)
-    _debug("openai: no tool_call; text=%r" % ((message.get("content") or "")[:120]))
-    return LLMProposal(intent="", script="",
-                       text=message.get("content") or "",
-                       is_tool_call=False, reasoning=reasoning)
+    content = message.get("content") or ""
+    for call in (message.get("tool_calls") or []):
+        fn = call.get("function") or {}
+        name = fn.get("name")
+        args = json.loads(fn.get("arguments") or "{}")
+        if name == _FINISH_NAME:
+            _debug("openai: finish")
+            return LLMProposal(intent="", script="",
+                               text=args.get("summary", "") or content,
+                               is_tool_call=False, reasoning=reasoning,
+                               kind="finish")
+        if name == _TOOL_NAME:
+            _debug("openai: run_freecad_script")
+            return LLMProposal(intent=args.get("intent", ""),
+                               script=args.get("script", ""),
+                               text=content,
+                               is_tool_call=True, reasoning=reasoning,
+                               kind="script")
+    # No recognized tool call (a model that ignored tool_choice): treat any text
+    # as a finish so the turn still resolves rather than looping.
+    _debug("openai: no tool call; text=%r" % (content[:120]))
+    return LLMProposal(intent="", script="", text=content,
+                       is_tool_call=False, reasoning=reasoning, kind="finish")
 
 
 def _complete_anthropic(wire_model: str, messages: list,
@@ -313,34 +350,48 @@ def _complete_anthropic(wire_model: str, messages: list,
         "tools": ANTHROPIC_TOOL_SCHEMA,
     }
     effort = getattr(settings, "reasoning_effort", "off")
-    if effort and effort != "off":
+    thinking_on = bool(effort and effort != "off")
+    if thinking_on:
         payload["thinking"] = {"type": "adaptive", "display": "summarized"}
         payload["output_config"] = {"effort": effort}
+        # Anthropic rejects forced tool_choice together with thinking; thinking
+        # models follow the two-tool contract from the prompt anyway.
+    else:
+        payload["tool_choice"] = {"type": "any"}  # force one of the two tools
     resp = _http_post_json(url, headers, payload)
     content = resp.get("content")
     if not isinstance(content, list):
         raise LLMError(f"Unexpected response shape: {resp!r}")
     text_parts = []
     thinking_parts = []
-    tool_block = None
+    script_block = None
+    finish_block = None
     for block in content:
         btype = block.get("type")
         if btype == "tool_use" and block.get("name") == _TOOL_NAME:
-            tool_block = block  # keep scanning so thinking blocks are collected
+            script_block = block
+        elif btype == "tool_use" and block.get("name") == _FINISH_NAME:
+            finish_block = block
         elif btype == "text":
             text_parts.append(block.get("text", ""))
         elif btype == "thinking":
             thinking_parts.append(block.get("thinking", "") or "")
     reasoning = "\n".join(t for t in thinking_parts if t)
-    if tool_block is not None:
-        args = tool_block.get("input") or {}
+    if script_block is not None:
+        args = script_block.get("input") or {}
         return LLMProposal(intent=args.get("intent", ""),
                            script=args.get("script", ""),
                            text="".join(text_parts),
-                           is_tool_call=True, reasoning=reasoning)
+                           is_tool_call=True, reasoning=reasoning, kind="script")
+    if finish_block is not None:
+        args = finish_block.get("input") or {}
+        return LLMProposal(intent="", script="",
+                           text=args.get("summary", "") or "".join(text_parts),
+                           is_tool_call=False, reasoning=reasoning, kind="finish")
+    # Thinking-on path may return plain text; treat it as a finish.
     return LLMProposal(intent="", script="",
                        text="".join(text_parts),
-                       is_tool_call=False, reasoning=reasoning)
+                       is_tool_call=False, reasoning=reasoning, kind="finish")
 
 
 def complete(messages: list, settings: Settings) -> "LLMProposal":
