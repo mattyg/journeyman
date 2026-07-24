@@ -35,47 +35,74 @@ class _Turn:
         }
 
 
+class DocumentAccess:
+    """The agent's single, uniform view of the FreeCAD document.
+
+    Wraps a legacy ``inspector`` callable — either a bare ``inspector(app)`` /
+    ``inspector(app, rich=...)`` function, optionally carrying ``.state`` /
+    ``.inspect`` / ``.api_lookup`` attributes (as ``chat_panel`` builds it), or
+    a simple test double. Any method the callable does not provide falls back to
+    the real ``document_inspector`` / ``api_reference`` module functions, so the
+    agent can call ``snapshot`` / ``state`` / ``inspect`` / ``api_lookup``
+    unconditionally rather than probing for capabilities at every use.
+    """
+
+    def __init__(self, inspector, app, agent):
+        self._inspector = inspector
+        self._app = app
+        # Read settings off the agent so a mid-conversation settings swap
+        # (chat_panel sets agent.settings on each send) stays authoritative.
+        self._agent = agent
+
+    @property
+    def _rich(self):
+        return self._agent.settings.rich_snapshot
+
+    def snapshot(self):
+        try:
+            return self._inspector(self._app, rich=self._rich)
+        except TypeError:
+            # A test double may accept only (app); the production inspector
+            # accepts the rich keyword.
+            return self._inspector(self._app)
+
+    def state(self):
+        reader = getattr(self._inspector, "state", None)
+        if reader is not None:
+            return reader(self._app, self._rich)
+        from . import document_inspector
+        return document_inspector.document_state(self._app, rich=self._rich)
+
+    def inspect(self, query):
+        reader = getattr(self._inspector, "inspect", None)
+        if reader is not None:
+            return reader(self._app, query)
+        from . import document_inspector
+        return document_inspector.inspect(self._app, query)
+
+    def api_lookup(self, query, module="FreeCAD", symbol=""):
+        reader = getattr(self._inspector, "api_lookup", None)
+        if reader is not None:
+            return reader(self._app, query, module, symbol)
+        from . import api_reference
+        return api_reference.lookup(self._app, query, module, symbol)
+
+
 class Agent:
     def __init__(self, client, inspector, executor, app, settings,
                  view_capture=None):
         self.client = client
-        self.inspector = inspector
         self.executor = executor
         self.app = app
         self.settings = settings
         self.messages = []
         self.view_capture = view_capture
-
-    def _snapshot(self):
-        try:
-            return self.inspector(self.app, rich=self.settings.rich_snapshot)
-        except TypeError:
-            return self.inspector(self.app)
-
-    def _state(self):
-        from . import document_inspector
-        state_reader = getattr(self.inspector, "state", None)
-        if state_reader:
-            return state_reader(self.app, self.settings.rich_snapshot)
-        return document_inspector.document_state(
-            self.app, rich=self.settings.rich_snapshot)
-
-    def _inspect(self, query):
-        from . import document_inspector
-        reader = getattr(self.inspector, "inspect", None)
-        return (reader(self.app, query) if reader
-                else document_inspector.inspect(self.app, query))
-
-    def _api_lookup(self, query, module="FreeCAD", symbol=""):
-        from . import api_reference
-        reader = getattr(self.inspector, "api_lookup", None)
-        return (reader(self.app, query, module, symbol) if reader
-                else api_reference.lookup(self.app, query, module, symbol))
+        self.access = DocumentAccess(inspector, app, self)
 
     def _handle_inspect(self, proposal, turn):
         """Read-only inspection: run the query, feed the result back."""
         from . import turn_protocol
-        inspected = self._inspect(proposal.query)
+        inspected = self.access.inspect(proposal.query)
         verification_inspection = (
             bool(turn.executed_steps) and self.settings.final_design_review)
         if verification_inspection:
@@ -151,7 +178,7 @@ class Agent:
     def _handle_api_lookup(self, proposal, turn):
         """FreeCAD API reference lookup requested by the model."""
         from . import turn_protocol
-        reference = self._api_lookup(
+        reference = self.access.api_lookup(
             proposal.api_query, proposal.api_module, proposal.api_symbol)
         self.messages.append({
             "role": "assistant",
@@ -225,7 +252,7 @@ class Agent:
         context_cursor = len(self.messages)
         include_system_context = context_cursor == 0
         check_cancelled()
-        snap = self._snapshot()
+        snap = self.access.snapshot()
         request_text = turn_protocol.request(snap, user_message)
         if user_images:
             content = [{"type": "text", "text": request_text}]
@@ -371,7 +398,7 @@ class Agent:
                 return note
 
             check_cancelled()
-            before = self._state()
+            before = self.access.state()
             try:
                 result = self.executor.run(
                     self.app, proposal.script,
@@ -379,8 +406,8 @@ class Agent:
                     rollback_on_failure=self.settings.rollback_on_validation_failure)
             except TypeError:
                 result = self.executor.run(self.app, proposal.script)
-            after = self._state()
-            new_snap = self._snapshot()
+            after = self.access.state()
+            new_snap = self.access.snapshot()
             on_result(result, new_snap, proposal.intent, proposal.script)
             # If cancellation arrived while Python was already executing, the
             # script cannot be interrupted safely. Report its actual result,
@@ -472,7 +499,7 @@ class Agent:
                     if candidate in result.error or candidate in proposal.script:
                         module = candidate
                         break
-                reference = self._api_lookup(
+                reference = self.access.api_lookup(
                     "Resolve this script API failure:\n" + result.error[-3000:],
                     module, "")
                 self.messages.append({

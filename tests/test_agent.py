@@ -508,3 +508,57 @@ def test_handle_question_rejects_too_few_options():
     assert signal is LOOP
     assert turn.question_retries == 1
     assert "[invalid ask_user call]" in str(agent.messages[-1])
+
+
+# --- DocumentAccess adaptation (the seam that replaced four inline shims) ----
+from freecad.llm_copilot.agent import DocumentAccess
+
+
+class _StubAgent:
+    def __init__(self, settings):
+        self.settings = settings
+
+
+def test_document_access_uses_rich_kwarg_when_inspector_accepts_it():
+    seen = {}
+
+    def inspector(app, rich=False):
+        seen["rich"] = rich
+        return "SNAP"
+
+    access = DocumentAccess(
+        inspector, app="APP",
+        agent=_StubAgent(_settings(rich_snapshot=True)))
+    assert access.snapshot() == "SNAP"
+    assert seen["rich"] is True
+
+
+def test_document_access_falls_back_to_bare_test_double():
+    access = DocumentAccess(
+        lambda app: "SNAP", app="APP",
+        agent=_StubAgent(_settings()))
+    assert access.snapshot() == "SNAP"
+
+
+def test_document_access_reads_settings_live_from_agent():
+    def inspector(app, rich=False):
+        return "rich" if rich else "plain"
+
+    stub = _StubAgent(_settings(rich_snapshot=False))
+    access = DocumentAccess(inspector, app="APP", agent=stub)
+    assert access.snapshot() == "plain"
+    # A mid-conversation settings swap must be reflected immediately.
+    stub.settings = _settings(rich_snapshot=True)
+    assert access.snapshot() == "rich"
+
+
+def test_document_access_prefers_inspector_attributes_for_state_and_inspect():
+    inspector = lambda app: "SNAP"
+    inspector.state = lambda app, rich: {"objects": {"via": "attr"}}
+    inspector.inspect = lambda app, query: f"inspected:{query}"
+    inspector.api_lookup = lambda app, q, m, s: f"api:{m}.{s}"
+    access = DocumentAccess(
+        inspector, app="APP", agent=_StubAgent(_settings()))
+    assert access.state() == {"objects": {"via": "attr"}}
+    assert access.inspect("edges") == "inspected:edges"
+    assert access.api_lookup("q", "Part", "Box") == "api:Part.Box"
