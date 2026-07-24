@@ -8,7 +8,7 @@ class Agent:
         self.settings = settings
         self.messages = []
 
-    def send(self, user_message, on_intent, on_result) -> str:
+    def send(self, user_message, on_intent, on_result, on_reasoning=None) -> str:
         snap = self.inspector(self.app)
         self.messages.append({
             "role": "user",
@@ -18,6 +18,9 @@ class Agent:
         retries = 0
         while True:
             proposal = self.client.complete(self.messages, self.settings)
+            reasoning = getattr(proposal, "reasoning", "")
+            if reasoning and on_reasoning is not None:
+                on_reasoning(reasoning)
             if not proposal.is_tool_call:
                 self.messages.append({"role": "assistant", "content": proposal.text})
                 return proposal.text

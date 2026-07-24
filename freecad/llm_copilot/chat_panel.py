@@ -1,4 +1,5 @@
 # freecad/llm_copilot/chat_panel.py
+import html
 import threading
 from PySide import QtGui, QtCore
 import FreeCAD
@@ -57,13 +58,19 @@ class CopilotDockWidget(QtGui.QDockWidget):
     intentAsked = QtCore.Signal(str, object, object)
     # Toggle input/button enabled state from the worker thread.
     busyChanged = QtCore.Signal(bool)
+    # Model reasoning text captured from the response (worker -> GUI thread).
+    reasoningReady = QtCore.Signal(str)
 
     def __init__(self, parent=None):
         super().__init__("LLM Copilot", parent)
         self.setObjectName("LLMCopilotDock")
         body = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(body)
-        self.log = QtGui.QTextEdit(); self.log.setReadOnly(True)
+        # QTextBrowser (not QTextEdit) so the collapsible "Thinking" toggle can
+        # be a clickable anchor. We render the whole transcript from _entries.
+        self.log = QtGui.QTextBrowser()
+        self.log.setOpenLinks(False)
+        self.log.anchorClicked.connect(self._on_anchor)
         self.input = QtGui.QLineEdit()
         self.send_btn = QtGui.QPushButton("Send")
         self.undo_btn = QtGui.QPushButton("Undo last change")
@@ -76,11 +83,16 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.input.returnPressed.connect(self._on_send)  # Enter sends
         self.undo_btn.clicked.connect(self._on_undo)
         # These signals are emitted from the worker thread, so force a queued
-        # connection: the slots must run on the GUI thread (QMessageBox and
-        # QTextEdit use timers that must not start on a worker thread).
+        # connection: the slots must run on the GUI thread (Qt widgets use
+        # timers that must not start on a worker thread).
         self.resultReady.connect(self._append, QtCore.Qt.QueuedConnection)
         self.intentAsked.connect(self._ask_intent, QtCore.Qt.QueuedConnection)
         self.busyChanged.connect(self._set_busy, QtCore.Qt.QueuedConnection)
+        self.reasoningReady.connect(self._add_reasoning, QtCore.Qt.QueuedConnection)
+        # Transcript model: list of {"kind": "text"|"reasoning", ...}.
+        self._entries = []
+        self._reason_seq = 0
+        self._expanded = set()
         self._busy = False
         # Marshals every FreeCAD access to the main thread (FreeCAD/Qt is not
         # thread-safe; running document scripts off-thread corrupts the GUI).
@@ -112,7 +124,52 @@ class CopilotDockWidget(QtGui.QDockWidget):
                            app=FreeCAD, settings=settings)
 
     def _append(self, text):
-        self.log.append(text)
+        """Add a plain (HTML) transcript line. Empty strings are ignored."""
+        if text == "":
+            return
+        self._entries.append({"kind": "text", "html": text})
+        self._render()
+
+    def _add_reasoning(self, reasoning):
+        """Add a collapsible 'Thinking' entry holding the model's reasoning."""
+        if not reasoning:
+            return
+        self._reason_seq += 1
+        self._entries.append({
+            "kind": "reasoning", "id": self._reason_seq, "text": reasoning,
+        })
+        self._render()
+
+    def _on_anchor(self, url):
+        ref = url.toString()
+        if ref.startswith("reasoning:"):
+            rid = int(ref.split(":", 1)[1])
+            if rid in self._expanded:
+                self._expanded.discard(rid)
+            else:
+                self._expanded.add(rid)
+            self._render()
+
+    def _render(self):
+        parts = []
+        for e in self._entries:
+            if e["kind"] == "text":
+                parts.append(e["html"])
+            else:
+                rid = e["id"]
+                expanded = rid in self._expanded
+                arrow = "&#9662;" if expanded else "&#9656;"  # ▾ / ▸
+                parts.append(
+                    f'<a href="reasoning:{rid}" style="text-decoration:none;'
+                    f'color:gray;"><i>{arrow} Thinking</i></a>')
+                if expanded:
+                    body = html.escape(e["text"]).replace("\n", "<br>")
+                    parts.append(
+                        f'<div style="color:gray;margin-left:1em;">{body}</div>')
+        self.log.setHtml("<br>".join(parts))
+        # keep scrolled to the bottom
+        sb = self.log.verticalScrollBar()
+        sb.setValue(sb.maximum())
 
     def _ask_intent(self, intent, answer, done):
         """GUI-thread slot: show the confirm dialog, store the answer, unblock
@@ -155,9 +212,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
             status = "OK" if result.ok else f"ERROR: {result.error.splitlines()[-1]}"
             self.resultReady.emit(f"<i>step: {status}</i>")
 
+        def on_reasoning(reasoning):
+            self.reasoningReady.emit(reasoning)
+
         def work():
             try:
-                out = self.agent.send(msg, on_intent, on_result)
+                out = self.agent.send(msg, on_intent, on_result, on_reasoning)
                 self.resultReady.emit(f"<b>Copilot:</b> {out}")
             except Exception as e:
                 import traceback

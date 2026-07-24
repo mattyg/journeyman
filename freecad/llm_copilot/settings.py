@@ -60,6 +60,7 @@ class Settings:
     auto_approve_loop: bool
     max_auto_approved_steps: int
     self_correction_attempts: int
+    reasoning_effort: str = "off"   # off | low | medium | high (provider-dependent)
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -210,6 +211,7 @@ def load_settings(param_get) -> "Settings":
         auto_approve_loop=param_get.GetBool("AutoApproveLoop", False),
         max_auto_approved_steps=param_get.GetInt("MaxAutoApprovedSteps", 5),
         self_correction_attempts=param_get.GetInt("SelfCorrectionAttempts", 3),
+        reasoning_effort=param_get.GetString("ReasoningEffort", "off"),
     )
 
 

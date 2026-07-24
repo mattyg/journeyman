@@ -88,6 +88,17 @@ class LLMCopilotPreferencesPage:
         modelRow.addWidget(self.refreshBtn)
         form.addRow("Model", modelRow)
 
+        # Reasoning effort — shown only for providers that expose the knob.
+        self.reasoningCombo = QtGui.QComboBox()
+        for level in llm_client.REASONING_LEVELS:  # off | low | medium | high
+            self.reasoningCombo.addItem(level.capitalize(), level)
+        self.reasoningCombo.setToolTip(
+            "How much the model should reason before answering, if the provider "
+            "supports it. Higher can improve quality but is slower/costlier.")
+        form.addRow("Reasoning", self.reasoningCombo)
+        self._reasoningLabel = form.labelForField(self.reasoningCombo)
+        self.reasoningCombo.currentIndexChanged.connect(self._save_reasoning)
+
         self.statusLabel = QtGui.QLabel("")
         self.statusLabel.setStyleSheet("color: gray;")
         form.addRow("", self.statusLabel)
@@ -131,6 +142,12 @@ class LLMCopilotPreferencesPage:
         self.autoApproveCheck.setChecked(p.GetBool("AutoApproveLoop", False))
         self.maxStepsSpin.setValue(p.GetInt("MaxAutoApprovedSteps", 5))
         self.retriesSpin.setValue(p.GetInt("SelfCorrectionAttempts", 3))
+        effort = p.GetString("ReasoningEffort", "off")
+        ri = self.reasoningCombo.findData(effort)
+        if ri >= 0:
+            self.reasoningCombo.blockSignals(True)
+            self.reasoningCombo.setCurrentIndex(ri)
+            self.reasoningCombo.blockSignals(False)
         self._sync_provider_fields(provider, fetch=True)
 
     def saveSettings(self):
@@ -144,6 +161,7 @@ class LLMCopilotPreferencesPage:
         self._save_key()
         self._save_host()
         self._save_model()
+        self._save_reasoning()
 
     # ---- provider/model plumbing ----
 
@@ -158,6 +176,12 @@ class LLMCopilotPreferencesPage:
         self.hostEdit.setVisible(is_ollama)
         if self._hostLabel is not None:
             self._hostLabel.setVisible(is_ollama)
+
+        # Reasoning control only for providers that expose it.
+        has_reasoning = provider in llm_client.PROVIDERS_WITH_REASONING
+        self.reasoningCombo.setVisible(has_reasoning)
+        if self._reasoningLabel is not None:
+            self._reasoningLabel.setVisible(has_reasoning)
 
         p = self._param
         self.apiKeyEdit.setText(st.get_api_key(p, provider))
@@ -256,3 +280,6 @@ class LLMCopilotPreferencesPage:
         provider = self._current_provider()
         st.set_model_for_provider(self._param, provider,
                                   self.modelCombo.currentText().strip())
+
+    def _save_reasoning(self, *_):
+        self._param.SetString("ReasoningEffort", self.reasoningCombo.currentData())

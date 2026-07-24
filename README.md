@@ -47,6 +47,10 @@ Open **Edit -> Preferences -> LLM Copilot**:
 - **Model** — an editable dropdown. It's filled from a short built-in list and,
   once a key/host is set, refreshed with the provider's live model list; click
   **Refresh** to re-pull. You can also type a model id directly.
+- **Reasoning** (providers that support it) — Off / Low / Medium / High. When the
+  model returns reasoning, the chat shows a collapsible **Thinking** line you can
+  expand to read it. Higher effort can improve results but is slower/costlier;
+  not all models expose reasoning even when requested.
 - **Autonomy** — *Confirm intent before running* (default on), *Auto-approve
   consecutive steps* (default off), *Max auto-approved steps* (default 5),
   *Self-correction attempts* (default 3).

@@ -77,3 +77,23 @@ def test_stops_at_max_auto_approved_steps():
                                        max_auto_approved_steps=2)).send(
         "box", on_intent=lambda i: True, on_result=lambda r, s: None)
     assert "pause" in out.lower() or "continue" in out.lower()
+
+def test_on_reasoning_fires_with_proposal_reasoning():
+    client = FakeClient([
+        LLMProposal("add a box", "import Part", "", True, reasoning="my thoughts"),
+        LLMProposal("", "", "Done.", False),
+    ])
+    ex = FakeExecutor([ExecResult(True, "", "")])
+    seen = []
+    _agent(client, ex, _settings()).send(
+        "box", on_intent=lambda i: True, on_result=lambda r, s: None,
+        on_reasoning=lambda r: seen.append(r))
+    assert "my thoughts" in seen
+
+def test_on_reasoning_optional_and_skipped_when_empty():
+    client = FakeClient([LLMProposal("", "", "Hi.", False)])  # no reasoning
+    ex = FakeExecutor([])
+    # omitting on_reasoning must not error
+    out = _agent(client, ex, _settings()).send(
+        "hi", on_intent=lambda i: True, on_result=lambda r, s: None)
+    assert out == "Hi."

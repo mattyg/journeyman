@@ -104,6 +104,15 @@ class LLMProposal:
     script: str
     text: str
     is_tool_call: bool
+    reasoning: str = ""   # model's thinking/reasoning, if the provider exposed it
+
+
+# Which providers expose a reasoning-effort knob (drives the Preferences UI).
+PROVIDERS_WITH_REASONING = ("anthropic", "openai", "openrouter")
+
+# Abstract effort levels stored in settings; translated per provider at request
+# time. "off" means don't request reasoning at all.
+REASONING_LEVELS = ("off", "low", "medium", "high")
 
 
 class LLMError(Exception):
@@ -233,6 +242,23 @@ def _base_url(settings: Settings, provider: str) -> str:
     return _OPENAI_DEFAULT_BASE
 
 
+def _openai_reasoning(message: dict) -> str:
+    """Best-effort reasoning extraction from an OpenAI-style message. Different
+    providers/models expose it under different keys (or not at all)."""
+    r = message.get("reasoning") or message.get("reasoning_content")
+    if isinstance(r, str):
+        return r
+    # OpenRouter can return structured reasoning_details: [{text/summary}, ...]
+    details = message.get("reasoning_details")
+    if isinstance(details, list):
+        parts = []
+        for d in details:
+            if isinstance(d, dict):
+                parts.append(d.get("text") or d.get("summary") or "")
+        return "\n".join(p for p in parts if p)
+    return ""
+
+
 def _complete_openai(wire_model: str, provider: str, messages: list,
                      settings: Settings) -> "LLMProposal":
     url = _base_url(settings, provider) + "/chat/completions"
@@ -244,11 +270,16 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
         "tools": TOOL_SCHEMA,
     }
+    effort = getattr(settings, "reasoning_effort", "off")
+    if effort and effort != "off":
+        # OpenAI-style reasoning control; models that don't support it ignore it.
+        payload["reasoning_effort"] = effort
     resp = _http_post_json(url, headers, payload)
     try:
         message = resp["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMError(f"Unexpected response shape: {resp!r}") from exc
+    reasoning = _openai_reasoning(message)
     tool_calls = message.get("tool_calls")
     if tool_calls:
         args = json.loads(tool_calls[0]["function"]["arguments"])
@@ -256,11 +287,11 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
         return LLMProposal(intent=args.get("intent", ""),
                            script=args.get("script", ""),
                            text=message.get("content") or "",
-                           is_tool_call=True)
+                           is_tool_call=True, reasoning=reasoning)
     _debug("openai: no tool_call; text=%r" % ((message.get("content") or "")[:120]))
     return LLMProposal(intent="", script="",
                        text=message.get("content") or "",
-                       is_tool_call=False)
+                       is_tool_call=False, reasoning=reasoning)
 
 
 def _complete_anthropic(wire_model: str, messages: list,
@@ -276,23 +307,35 @@ def _complete_anthropic(wire_model: str, messages: list,
         "messages": messages,
         "tools": ANTHROPIC_TOOL_SCHEMA,
     }
+    effort = getattr(settings, "reasoning_effort", "off")
+    if effort and effort != "off":
+        payload["thinking"] = {"type": "adaptive", "display": "summarized"}
+        payload["output_config"] = {"effort": effort}
     resp = _http_post_json(url, headers, payload)
     content = resp.get("content")
     if not isinstance(content, list):
         raise LLMError(f"Unexpected response shape: {resp!r}")
     text_parts = []
+    thinking_parts = []
+    tool_block = None
     for block in content:
-        if block.get("type") == "tool_use" and block.get("name") == _TOOL_NAME:
-            args = block.get("input") or {}
-            return LLMProposal(intent=args.get("intent", ""),
-                               script=args.get("script", ""),
-                               text="".join(text_parts),
-                               is_tool_call=True)
-        if block.get("type") == "text":
+        btype = block.get("type")
+        if btype == "tool_use" and block.get("name") == _TOOL_NAME:
+            tool_block = block  # keep scanning so thinking blocks are collected
+        elif btype == "text":
             text_parts.append(block.get("text", ""))
+        elif btype == "thinking":
+            thinking_parts.append(block.get("thinking", "") or "")
+    reasoning = "\n".join(t for t in thinking_parts if t)
+    if tool_block is not None:
+        args = tool_block.get("input") or {}
+        return LLMProposal(intent=args.get("intent", ""),
+                           script=args.get("script", ""),
+                           text="".join(text_parts),
+                           is_tool_call=True, reasoning=reasoning)
     return LLMProposal(intent="", script="",
                        text="".join(text_parts),
-                       is_tool_call=False)
+                       is_tool_call=False, reasoning=reasoning)
 
 
 def complete(messages: list, settings: Settings) -> "LLMProposal":

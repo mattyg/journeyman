@@ -3,8 +3,9 @@ import freecad.llm_copilot.llm_client as lc
 from freecad.llm_copilot.settings import Settings
 
 
-def _settings(model="openai/gpt-5.4", api_key="sk-x", api_base=""):
-    return Settings(model, api_key, api_base, True, False, 5, 3)
+def _settings(model="openai/gpt-5.4", api_key="sk-x", api_base="",
+              reasoning_effort="off"):
+    return Settings(model, api_key, api_base, True, False, 5, 3, reasoning_effort)
 
 
 def _patch_http(monkeypatch, response, captured):
@@ -74,6 +75,36 @@ def test_openrouter_default_base(monkeypatch):
     assert captured["payload"]["model"] == "anthropic/claude-opus-4-8"
 
 
+def test_openai_captures_reasoning_and_sends_effort(monkeypatch):
+    captured = {}
+    resp = _openai_response(None, "hi")
+    resp["choices"][0]["message"]["reasoning"] = "step one, step two"
+    _patch_http(monkeypatch, resp, captured)
+    p = lc.complete([{"role": "user", "content": "hi"}],
+                    _settings(reasoning_effort="high"))
+    assert p.reasoning == "step one, step two"
+    assert captured["payload"]["reasoning_effort"] == "high"
+
+
+def test_openai_no_effort_field_when_off(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _openai_response(None, "hi"), captured)
+    p = lc.complete([{"role": "user", "content": "hi"}], _settings())
+    assert "reasoning_effort" not in captured["payload"]
+    assert p.reasoning == ""
+
+
+def test_openrouter_reasoning_details(monkeypatch):
+    captured = {}
+    resp = _openai_response(None, "hi")
+    resp["choices"][0]["message"]["reasoning_details"] = [
+        {"text": "a"}, {"summary": "b"}]
+    _patch_http(monkeypatch, resp, captured)
+    p = lc.complete([{"role": "user", "content": "hi"}],
+                    _settings(model="openrouter/x"))
+    assert p.reasoning == "a\nb"
+
+
 # ---- Anthropic native adapter ----
 
 def _anthropic_response(blocks):
@@ -103,6 +134,22 @@ def test_anthropic_parses_tool_use(monkeypatch):
     assert captured["payload"]["tools"] == lc.ANTHROPIC_TOOL_SCHEMA
     # system is hoisted out of messages, not injected as a message
     assert all(m["role"] != "system" for m in captured["payload"]["messages"])
+
+
+def test_anthropic_captures_thinking_and_sends_config(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "thinking", "thinking": "considering the plate shape"},
+        {"type": "tool_use", "name": "run_freecad_script",
+         "input": {"intent": "make plate", "script": "pass"}},
+    ]), captured)
+    p = lc.complete([{"role": "user", "content": "x"}],
+                    _settings(model="anthropic/claude-opus-4-8",
+                              reasoning_effort="medium"))
+    assert p.is_tool_call is True
+    assert p.reasoning == "considering the plate shape"
+    assert captured["payload"]["thinking"]["type"] == "adaptive"
+    assert captured["payload"]["output_config"]["effort"] == "medium"
 
 
 def test_anthropic_plain_text(monkeypatch):
