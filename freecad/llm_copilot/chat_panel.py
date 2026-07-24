@@ -30,6 +30,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         layout.addWidget(self.undo_btn)
         self.setWidget(body)
         self.send_btn.clicked.connect(self._on_send)
+        self.input.returnPressed.connect(self._on_send)  # Enter sends
         self.undo_btn.clicked.connect(self._on_undo)
         self.resultReady.connect(self._append)
         self._build_agent()
