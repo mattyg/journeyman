@@ -9,6 +9,7 @@ import FreeCADGui as Gui
 
 from . import (
     document_inspector, script_executor, llm_client, view_capture, history_store,
+    transcript_export,
 )
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
@@ -157,6 +158,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
     stepReady = QtCore.Signal(object, str, str, object)
     # Tool call proposed by the model, before execution/dispatch.
     toolReady = QtCore.Signal(object, str, str, str)
+    # Result of a read-only tool call (inspection / API lookup).
+    toolResultReady = QtCore.Signal(object, str, str, str)
     # Newly-added request context about to be sent to the model.
     contextReady = QtCore.Signal(object, object)
     # Structured clarification question: document key, proposal, answer box,
@@ -202,7 +205,11 @@ class CopilotDockWidget(QtGui.QDockWidget):
             "Estimated from message text, system instructions, and tools; "
             "the provider's exact token count may differ.")
         self.clear_btn = QtGui.QPushButton("Clear context")
+        self.export_btn = QtGui.QPushButton("Export transcript…")
+        self.export_btn.setToolTip(
+            "Save the chat transcript for this document to a Markdown file.")
         context_row.addWidget(self.context_label, 1)
+        context_row.addWidget(self.export_btn)
         context_row.addWidget(self.clear_btn)
         layout.addWidget(self.log)
 
@@ -232,6 +239,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.input.returnPressed.connect(self._on_send)  # Enter sends
         self.undo_btn.clicked.connect(self._on_undo)
         self.clear_btn.clicked.connect(self._on_clear)
+        self.export_btn.clicked.connect(self._on_export)
         self.attach_btn.clicked.connect(self._on_attach_images)
         # These signals are emitted from the worker thread, so force a queued
         # connection: the slots must run on the GUI thread (Qt widgets use
@@ -242,6 +250,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.reasoningReady.connect(self._add_reasoning, QtCore.Qt.QueuedConnection)
         self.stepReady.connect(self._add_step, QtCore.Qt.QueuedConnection)
         self.toolReady.connect(self._add_tool, QtCore.Qt.QueuedConnection)
+        self.toolResultReady.connect(
+            self._update_tool_result, QtCore.Qt.QueuedConnection)
         self.contextReady.connect(self._add_context, QtCore.Qt.QueuedConnection)
         self.questionAsked.connect(
             self._ask_question, QtCore.Qt.QueuedConnection)
@@ -359,6 +369,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 "busy": False, "cancel_event": None,
                 "status_entry": None, "elapsed": 0,
                 "waiting_for_question": False,
+                "pending_script_tool": None,
+                "pending_info_tool": None,
             }
             state["page"], state["layout"] = self._new_transcript_page()
             self._document_states[key] = state
@@ -556,50 +568,47 @@ class CopilotDockWidget(QtGui.QDockWidget):
             title = "Tool · " + entry["tool"]
             if entry.get("summary"):
                 title += " — " + entry["summary"]
-            return self._disclosure(
-                title,
-                lambda: self._rich_label(
-                    _wrapped_pre(entry.get("details", ""))))
+
+            def tool_content():
+                markup = _wrapped_pre(entry.get("details", ""))
+                if entry.get("result"):
+                    markup += "<b>Result</b>" + _wrapped_pre(entry["result"])
+                return self._rich_label(markup)
+
+            return self._disclosure(title, tool_content)
         if kind == "step":
             result = entry["result"]
             def step_content():
-                if result.ok:
-                    result_text = "Success"
-                    if result.output.strip():
-                        result_text += _wrapped_pre(result.output.rstrip())
-                else:
-                    result_text = "Failed"
-                    if result.error:
-                        result_text += _wrapped_pre(result.error.rstrip())
-                    if result.output.strip():
-                        result_text += (
-                            "<b>Output</b>"
-                            + _wrapped_pre(result.output.rstrip()))
+                parts = ["<div>" + ("Success" if result.ok else "Failed")
+                         + "</div>"]
+
+                def section(label, text):
+                    parts.append(
+                        "<div><b>" + label + "</b></div>"
+                        + _wrapped_pre(text.rstrip()))
+
+                if not result.ok and result.error:
+                    section("Error", result.error)
+                if result.output.strip():
+                    section("Output", result.output)
                 validation = getattr(result, "validation", "")
                 if validation:
-                    result_text += (
-                        "<b>Validation</b>"
-                        + _wrapped_pre(validation.rstrip()))
+                    section("Validation", validation)
                 stderr = getattr(result, "stderr", "")
                 if stderr:
-                    result_text += (
-                        "<b>Standard error</b>"
-                        + _wrapped_pre(stderr.rstrip()))
+                    section("Standard error", stderr)
                 warnings = getattr(result, "console_warnings", "")
                 if warnings:
-                    result_text += (
-                        "<b>FreeCAD console warnings</b>"
-                        + _wrapped_pre(warnings.rstrip()))
+                    section("FreeCAD console warnings", warnings)
                 console_errors = getattr(result, "console_errors", "")
                 if console_errors:
-                    result_text += (
-                        "<b>FreeCAD console errors</b>"
-                        + _wrapped_pre(console_errors.rstrip()))
+                    section("FreeCAD console errors", console_errors)
                 if getattr(result, "rolled_back", False):
-                    result_text += "<b>Rolled back to the previous state.</b>"
+                    parts.append(
+                        "<div><b>Rolled back to the previous state.</b></div>")
                 return self._rich_label(
                     '<b>Python</b>' + _wrapped_pre(entry["script"])
-                    + "<b>Result</b><br>" + result_text)
+                    + "<div><b>Result</b></div>" + "".join(parts))
 
             return self._disclosure(
                 entry["intent"], step_content)
@@ -836,13 +845,25 @@ class CopilotDockWidget(QtGui.QDockWidget):
         if not state:
             return
         state["step_seq"] += 1
-        entry = {
-            "kind": "step", "id": state["step_seq"],
-            "intent": intent or "Executed Python step",
-            "script": script, "result": result,
-        }
-        state["entries"].append(entry)
-        self._add_entry_widget(state, entry)
+        entry = state.get("pending_script_tool")
+        if entry is not None:
+            entry.update({
+                "kind": "step", "id": state["step_seq"],
+                "intent": intent or "Executed Python step",
+                "script": script, "result": result,
+            })
+            for field in ("tool", "summary", "details"):
+                entry.pop(field, None)
+            self._replace_entry_widget(state, entry)
+            state["pending_script_tool"] = None
+        else:
+            entry = {
+                "kind": "step", "id": state["step_seq"],
+                "intent": intent or "Executed Python step",
+                "script": script, "result": result,
+            }
+            state["entries"].append(entry)
+            self._add_entry_widget(state, entry)
 
     def _add_tool(self, key, tool, summary, details):
         """Show a model tool call immediately, before it runs or returns."""
@@ -855,6 +876,30 @@ class CopilotDockWidget(QtGui.QDockWidget):
         }
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
+        if tool == "run_freecad_script":
+            state["pending_script_tool"] = entry
+        elif tool in ("inspect_document", "lookup_freecad_api"):
+            state["pending_info_tool"] = entry
+
+    def _update_tool_result(self, key, tool, summary, content):
+        """Attach a tool's result (or not-executed note) to its call entry."""
+        state = self._document_states.get(key)
+        if not state:
+            return
+        pending_key = ("pending_script_tool" if tool == "run_freecad_script"
+                       else "pending_info_tool")
+        entry = state.get(pending_key)
+        if entry is not None and entry.get("tool") == tool:
+            entry["result"] = content
+            self._replace_entry_widget(state, entry)
+            state[pending_key] = None
+        else:
+            entry = {
+                "kind": "tool", "tool": tool,
+                "summary": summary, "details": "", "result": content,
+            }
+            state["entries"].append(entry)
+            self._add_entry_widget(state, entry)
 
     def _add_context(self, key, messages):
         """Add a minimized record of context newly sent with an LLM call."""
@@ -1144,6 +1189,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         def on_tool(tool, summary, details):
             self.toolReady.emit(key, tool, summary, details)
 
+        def on_tool_result(tool, summary, content):
+            self.toolResultReady.emit(key, tool, summary, content)
+
         def on_question(proposal):
             answer = {}
             done = threading.Event()
@@ -1170,7 +1218,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     msg, on_intent, on_result, on_reasoning, on_context,
                     user_images=user_images, cancel_event=cancel_event,
                     on_question=on_question, on_timeout=on_timeout,
-                    on_tool=on_tool)
+                    on_tool=on_tool, on_tool_result=on_tool_result)
                 self.resultReady.emit(
                     key, f"<b>{html.escape(model_label)}:</b>"
                     + markdown_to_html(out))
@@ -1194,6 +1242,21 @@ class CopilotDockWidget(QtGui.QDockWidget):
         script_executor.undo(FreeCAD)
         self._append(self._document_key, "<i>Undid last change.</i>")
         self._persist_state()
+
+    def _on_export(self):
+        """Save the active document's chat transcript to a Markdown file."""
+        state = self._document_states.get(self._document_key)
+        entries = state["entries"] if state is not None else self._entries
+        text = transcript_export.entries_to_markdown(entries)
+        if not text:
+            return
+        path, _selected_filter = QtGui.QFileDialog.getSaveFileName(
+            self, "Export chat transcript", "chat-transcript.md",
+            "Markdown (*.md);;Text files (*.txt)")
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
 
     def _on_clear(self):
         """Clear only the active document's model context and transcript."""

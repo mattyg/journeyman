@@ -87,13 +87,54 @@ def test_tool_callback_reports_inspection_and_api_lookup():
         ("lookup_freecad_api", "PartDesign.Pad", "Pad length property"),
     ]
 
+
+def test_on_tool_result_reports_inspection_and_api_lookup_results():
+    client = FakeClient([
+        LLMProposal(
+            "", "", "", False, kind="inspect", query="Sketch.Support"),
+        LLMProposal(
+            "", "", "", False, kind="api_lookup",
+            api_query="Pad length property", api_module="PartDesign",
+            api_symbol="Pad"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    inspector = lambda _app: "DOC"
+    inspector.inspect = lambda _app, query: "inspection:" + query
+    inspector.api_lookup = lambda _app, q, m, s: f"api:{m}.{s}:{q}"
+    seen = []
+    agent = Agent(
+        client, inspector, FakeExecutor([]), object(), _settings())
+    agent.send(
+        "inspect", lambda _intent: True,
+        lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content:
+        seen.append((tool, summary, content)))
+    assert seen == [
+        ("inspect_document", "Sketch.Support",
+         "[inspection result]\ninspection:Sketch.Support"),
+        ("lookup_freecad_api", "PartDesign.Pad",
+         "[installed-version API reference]\napi:PartDesign.Pad:"
+         "Pad length property"),
+    ]
+    # The callback content is exactly what was appended to the model history.
+    user_feedback = [
+        m["content"] for m in agent.messages if m["role"] == "user"]
+    assert seen[0][2] in user_feedback
+    assert seen[1][2] in user_feedback
+
 def test_gate_rejection_stops_without_executing():
     client = FakeClient([LLMProposal("add a box", "import Part", "", True)])
     ex = FakeExecutor([])
+    tool_results = []
     out = _agent(client, ex, _settings()).send(
         "make a box", on_intent=lambda i: False,
-        on_result=lambda r, s, i, p: None)
+        on_result=lambda r, s, i, p: None,
+        on_tool_result=lambda tool, summary, content:
+        tool_results.append((tool, summary, content)))
     assert "cancel" in out.lower()
+    assert tool_results == [(
+        "run_freecad_script", "add a box",
+        "Not executed — declined by user.")]
 
 
 def test_cancelled_response_is_discarded_before_script_runs():
@@ -121,6 +162,40 @@ def test_cancelled_response_is_discarded_before_script_runs():
     assert executor.results == []
     assert client.calls
 
+
+def test_cancel_after_execution_records_result_in_history():
+    cancelled = threading.Event()
+
+    class CancellingExecutor(FakeExecutor):
+        def run(self, app, script, **kwargs):
+            result = super().run(app, script, **kwargs)
+            cancelled.set()
+            return result
+
+    client = FakeClient([LLMProposal("add a box", "import Part", "", True)])
+    agent = _agent(
+        client, CancellingExecutor([ExecResult(True, "box made", "")]),
+        _settings(auto_approve_loop=True))
+    try:
+        agent.send(
+            "make a box", on_intent=lambda i: True,
+            on_result=lambda r, s, i, p: None,
+            cancel_event=cancelled)
+    except AgentCancelled:
+        pass
+    else:
+        assert False, "expected AgentCancelled"
+    text = str(agent.messages)
+    assert "[step executed, then cancelled by user]" in text
+    assert "box made" in text
+    # The recorded outcome precedes the cancellation note.
+    roles = [
+        (m["role"], m["content"]) for m in agent.messages
+        if "cancelled by user" in m["content"]
+        or m["content"] == "Cancelled by user."]
+    assert roles[0][0] == "user"
+    assert roles[1] == ("assistant", "Cancelled by user.")
+
 def test_self_correction_on_error_then_success():
     client = FakeClient([
         LLMProposal("add a box", "bad", "", True),
@@ -143,6 +218,63 @@ def test_gives_up_after_self_correction_attempts():
                                        auto_approve_loop=True)).send(
         "box", on_intent=lambda i: True, on_result=lambda r, s, i, p: None)
     assert "couldn't" in out.lower() or "could not" in out.lower()
+
+
+def test_retry_exhaustion_keeps_full_diagnostics_in_history():
+    client = FakeClient([LLMProposal("try", "bad", "", True)])
+    result = ExecResult(
+        False, "partial output", "Traceback: NameError",
+        stderr="deprecation warning\n")
+    agent = _agent(
+        client, FakeExecutor([result]),
+        _settings(self_correction_attempts=1, auto_approve_loop=True))
+    out = agent.send(
+        "box", on_intent=lambda i: True, on_result=lambda r, s, i, p: None)
+    assert "couldn't complete" in out
+    feedback = [
+        m["content"] for m in agent.messages
+        if m["role"] == "user" and "[script failed]" in m["content"]]
+    assert len(feedback) == 1
+    assert "partial output" in feedback[0]
+    assert "deprecation warning" in feedback[0]
+    assert "NameError" in feedback[0]
+    # The diagnostics precede the assistant's give-up summary.
+    index = agent.messages.index(
+        next(m for m in agent.messages
+             if m["role"] == "user" and m["content"] == feedback[0]))
+    assert agent.messages[index + 1] == {
+        "role": "assistant", "content": out}
+
+
+def test_successful_script_source_is_scrubbed_by_default():
+    client = FakeClient([
+        LLMProposal("add a box", "import Part", "", True),
+        LLMProposal("", "", "Done.", False),
+    ])
+    agent = _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True))
+    agent.send("box", on_intent=lambda i: True,
+               on_result=lambda r, s, i, p: None)
+    text = str(agent.messages)
+    assert "(executed intent) add a box" in text
+    assert "import Part" not in text
+
+
+def test_keep_script_history_retains_script_source():
+    client = FakeClient([
+        LLMProposal("add a box", "import Part", "", True),
+        LLMProposal("", "", "Done.", False),
+    ])
+    agent = _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True, keep_script_history=True))
+    agent.send("box", on_intent=lambda i: True,
+               on_result=lambda r, s, i, p: None)
+    text = str(agent.messages)
+    assert "(intent) add a box" in text
+    assert "import Part" in text
+    assert "(executed intent)" not in text
 
 def test_stops_at_max_auto_approved_steps():
     # every proposal is a successful tool call -> would loop forever without cap
@@ -675,6 +807,35 @@ def test_replica_omission_requires_explicit_question_round():
     assert not executor.results
 
 
+def test_fidelity_rejection_marks_tool_not_executed():
+    client = FakeClient([
+        LLMProposal(
+            "start bend", "pass", "", True,
+            observed_features=(_feature("blocked", "too hard"),)),
+        LLMProposal(
+            "start bend", "pass", "", True,
+            observed_features=(
+                _feature("implemented", "Measured 25 degree bend"),)),
+        LLMProposal(
+            "", "", "Done", False, kind="finish",
+            fidelity_met=True, fidelity_omissions=()),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    tool_results = []
+    out = _agent(
+        client, executor,
+        _settings(fidelity_target="replica", auto_approve_loop=True)).send(
+            "replicate hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content:
+            tool_results.append((tool, summary, content)))
+    assert out == "Done"
+    assert tool_results == [(
+        "run_freecad_script", "start bend",
+        "Not executed — replica fidelity check rejected the step "
+        "before execution.")]
+
+
 def test_part_workbench_step_is_rolled_back_and_rebuilt_natively():
     states = iter([
         {"objects": {}},
@@ -706,13 +867,20 @@ def test_part_workbench_step_is_rolled_back_and_rebuilt_natively():
     agent = Agent(
         client, inspector, executor, object(),
         _settings(auto_approve_loop=True))
+    reported = []
     out = agent.send(
         "make box", lambda _intent: True,
-        lambda _r, _s, _i, _p: None)
+        lambda r, s, i, p: reported.append((r, i)))
     assert out == "Done"
     assert executor.undos == 1
     assert any("[Part Design violation" in str(call)
                for call in client.calls)
+    # The rolled-back step must still be reported to the UI as a result.
+    assert len(reported) == 2
+    assert reported[0][1] == "shortcut"
+    assert reported[0][0].rolled_back is True
+    assert reported[1][1] == "native pad"
+    assert reported[1][0].rolled_back is False
 
 
 def test_user_images_are_sent_in_initial_multimodal_message():

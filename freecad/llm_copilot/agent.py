@@ -131,7 +131,7 @@ class Agent:
         self.view_capture = view_capture
         self.access = DocumentAccess(inspector, app, self)
 
-    def _handle_inspect(self, proposal, turn):
+    def _handle_inspect(self, proposal, turn, on_tool_result=None):
         """Read-only inspection: run the query, feed the result back."""
         from . import turn_protocol
         inspected = self.access.inspect(proposal.query)
@@ -143,10 +143,11 @@ class Agent:
         self.messages.append({
             "role": "assistant",
             "content": f"(read-only inspection) {proposal.query}"})
-        self.messages.append({
-            "role": "user",
-            "content": turn_protocol.inspection_result(
-                inspected, verify_stage=verification_inspection)})
+        feedback = turn_protocol.inspection_result(
+            inspected, verify_stage=verification_inspection)
+        self.messages.append({"role": "user", "content": feedback})
+        if on_tool_result is not None:
+            on_tool_result("inspect_document", proposal.query, feedback)
         return LOOP
 
     def _handle_question(self, proposal, turn, on_question, check_cancelled):
@@ -207,7 +208,7 @@ class Agent:
         })
         return LOOP
 
-    def _handle_api_lookup(self, proposal, turn):
+    def _handle_api_lookup(self, proposal, turn, on_tool_result=None):
         """FreeCAD API reference lookup requested by the model."""
         from . import turn_protocol
         reference = self.access.api_lookup(
@@ -218,10 +219,14 @@ class Agent:
                 f"(FreeCAD API lookup) {proposal.api_module}."
                 f"{proposal.api_symbol}\n{proposal.api_query}"),
         })
-        self.messages.append({
-            "role": "user",
-            "content": turn_protocol.api_reference(reference),
-        })
+        feedback = turn_protocol.api_reference(reference)
+        self.messages.append({"role": "user", "content": feedback})
+        target = ".".join(
+            value for value in
+            (proposal.api_module, proposal.api_symbol) if value)
+        if on_tool_result is not None:
+            on_tool_result(
+                "lookup_freecad_api", target or proposal.api_query, feedback)
         return LOOP
 
     def _handle_completion(self, proposal, turn):
@@ -290,7 +295,8 @@ class Agent:
 
     def send(self, user_message, on_intent, on_result, on_reasoning=None,
              on_context=None, user_images=None, cancel_event=None,
-             on_question=None, on_timeout=None, on_tool=None) -> str:
+             on_question=None, on_timeout=None, on_tool=None,
+             on_tool_result=None) -> str:
         from . import cad_workflow, turn_protocol
         from .llm_client import LLMTimeoutError
 
@@ -384,7 +390,7 @@ class Agent:
                         target or proposal.api_query,
                         proposal.api_query)
             if proposal.kind == "inspect" and self.settings.read_only_inspection:
-                self._handle_inspect(proposal, turn)
+                self._handle_inspect(proposal, turn, on_tool_result)
                 continue
             if proposal.kind == "question":
                 if turn.assumption_clarification:
@@ -417,7 +423,7 @@ class Agent:
                 return signal
             if (proposal.kind == "api_lookup"
                     and self.settings.freecad_api_lookup):
-                self._handle_api_lookup(proposal, turn)
+                self._handle_api_lookup(proposal, turn, on_tool_result)
                 continue
             # A finish (or any non-script response) ends the turn; its text is
             # the message shown to the user. The model can't leak a script here
@@ -613,6 +619,11 @@ class Agent:
                             "because a feature is difficult; use another CAD "
                             "strategy or ask_user for explicit omission approval."),
                     })
+                    if on_tool_result is not None:
+                        on_tool_result(
+                            "run_freecad_script", proposal.intent,
+                            "Not executed — replica fidelity check rejected "
+                            "the step before execution.")
                     continue
                 turn.ledger["observed_features"] = features
                 turn.fidelity_clarification = False
@@ -649,6 +660,10 @@ class Agent:
                 check_cancelled()
                 note = "Cancelled before running."
                 self.messages.append({"role": "user", "content": note})
+                if on_tool_result is not None:
+                    on_tool_result(
+                        "run_freecad_script", proposal.intent,
+                        "Not executed — declined by user.")
                 return note
 
             check_cancelled()
@@ -669,6 +684,11 @@ class Agent:
                 if part_design_issues:
                     self.executor.undo(self.app)
                     current_snapshot = self.access.snapshot()
+                    # The script ran but was rolled back; still report the
+                    # outcome so the UI shows a result for this tool call.
+                    result.rolled_back = True
+                    on_result(result, current_snapshot,
+                              proposal.intent, proposal.script)
                     turn.part_design_retries += 1
                     if turn.part_design_retries > max(
                             1, self.settings.self_correction_attempts):
@@ -691,8 +711,19 @@ class Agent:
                 turn.part_design_retries = 0
             on_result(result, new_snap, proposal.intent, proposal.script)
             # If cancellation arrived while Python was already executing, the
-            # script cannot be interrupted safely. Report its actual result,
-            # then stop before making another model request.
+            # script cannot be interrupted safely. Record its actual result in
+            # history so the next turn sees what happened, then stop before
+            # making another model request.
+            if cancel_event is not None and cancel_event.is_set():
+                outcome = (
+                    turn_protocol.failure_feedback(result)
+                    if not result.ok else
+                    (result.output or "(no output)")[:2000])
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        "[step executed, then cancelled by user]\n" + outcome),
+                })
             check_cancelled()
 
             validation_ok = getattr(result, "validation_ok", True)
@@ -719,10 +750,12 @@ class Agent:
                     "role": "user",
                     "content": feedback,
                 })
-                # Keep the durable event but discard successful script source;
-                # the current document and diff are authoritative thereafter.
-                self.messages[intent_message_index]["content"] = (
-                    f"(executed intent) {proposal.intent}{workflow_line}")
+                # Keep the durable event but discard successful script source
+                # unless the user opted to retain it; the current document and
+                # diff are authoritative thereafter.
+                if not self.settings.keep_script_history:
+                    self.messages[intent_message_index]["content"] = (
+                        f"(executed intent) {proposal.intent}{workflow_line}")
                 if (changed_names and self.settings.rendered_views
                         and self.view_capture):
                     try:
@@ -766,6 +799,12 @@ class Agent:
             # error path
             turn.retries += 1
             if turn.retries >= self.settings.self_correction_attempts:
+                # Keep the full diagnostics in history so later turns see the
+                # same detail the user saw, not just the last error line.
+                self.messages.append({
+                    "role": "user",
+                    "content": turn_protocol.failure_feedback(result),
+                })
                 summary = ("I couldn't complete this after "
                            f"{turn.retries} attempts. Last error:\n{result.error}")
                 self.messages.append({"role": "assistant", "content": summary})
