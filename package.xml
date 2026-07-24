@@ -14,6 +14,6 @@
       <subdirectory>./freecad/llm_copilot/</subdirectory>
     </workbench>
   </content>
-  <!-- litellm is not on the Addon Manager python allow-list; it is installed
-       from requirements.txt (see README). Bundling strategy revisited in Task 8. -->
+  <!-- No Python dependencies: the LLM client uses only the standard library
+       (urllib + json), so nothing needs to be pip-installed or vendored. -->
 </package>

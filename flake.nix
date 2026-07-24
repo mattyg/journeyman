@@ -15,12 +15,10 @@
         pkgs = nixpkgs.legacyPackages.${system};
 
         # Pure-Python test tier: our agent/llm_client/settings/deps modules import
-        # neither FreeCAD nor Qt, so plain CPython + pytest runs them. litellm is
-        # included so llm_client can be exercised; it is monkeypatched in tests but
-        # importing the module must not fail.
+        # neither FreeCAD nor Qt (and the LLM client is stdlib-only — urllib+json),
+        # so plain CPython + pytest runs them with no third-party packages.
         pythonEnv = pkgs.python3.withPackages (ps: with ps; [
           pytest
-          litellm
         ]);
       in
       {

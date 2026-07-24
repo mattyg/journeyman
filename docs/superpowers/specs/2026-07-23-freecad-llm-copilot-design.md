@@ -1,7 +1,19 @@
 # FreeCAD LLM Copilot — Design
 
 **Date:** 2026-07-23
-**Status:** Approved (pending spec review)
+**Status:** Implemented
+
+> **Amendment (during implementation): LLM client is stdlib-only, not LiteLLM.**
+> The original design specified LiteLLM as the provider abstraction. During
+> implementation we found LiteLLM (and every comparable library — aisuite, the
+> anthropic SDK) depends on packages absent from FreeCAD's bundled Python
+> (`httpx`/`requests`, compiled `pydantic-core`/`jiter`) and not on the Addon
+> Manager allow-list. We replaced it with a zero-dependency client using only
+> `urllib` + `json`, with two adapters: OpenAI-compatible (OpenAI, Ollama,
+> OpenRouter) and Anthropic-native (`/v1/messages`). Provider is selected by the
+> model-string prefix. This keeps the exact `complete(messages, settings) ->
+> LLMProposal` interface, so the agent loop is unchanged, and makes the addon
+> install-free on every FreeCAD. The "Packaging Note" below is therefore moot.
 
 ## Summary
 

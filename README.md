@@ -11,36 +11,32 @@ Python. Instead, for every step you see a plain-language statement of intent
 **Keep** / **Undo last change** choice. The underlying code is intentionally
 hidden from the chat surface.
 
-## Provider-agnostic via LiteLLM
+## Provider-agnostic, zero dependencies
 
-The copilot talks to models through [LiteLLM](https://github.com/BerriAI/litellm),
-so it works with any provider LiteLLM supports by changing a single model
-string in settings, e.g.:
+The copilot talks to models over plain HTTPS using only the Python standard
+library — there is **nothing to pip-install** and nothing vendored. You choose
+a provider by setting a single model string in settings; the provider is taken
+from the prefix. Four providers are supported:
 
-- `anthropic/claude-opus-4-8`
-- `openai/gpt-5.4`
-- `ollama/llama3`
+| Model string example                       | Provider   | API used                          |
+|--------------------------------------------|------------|-----------------------------------|
+| `openai/gpt-5.4`                           | OpenAI     | OpenAI `/v1/chat/completions`     |
+| `openrouter/anthropic/claude-opus-4-8`     | OpenRouter | OpenAI-compatible                 |
+| `ollama/llama3`                            | Ollama     | OpenAI-compatible (set `ApiBase`) |
+| `anthropic/claude-opus-4-8`                | Anthropic  | native `/v1/messages`             |
 
-No provider-specific code lives in the plugin itself.
+Anything without a recognized prefix is treated as an OpenAI-compatible
+endpoint, so other gateways work too by pointing `ApiBase` at them.
+
+For **Ollama** (local), set `ApiBase` to your server's OpenAI-compatible URL,
+e.g. `http://localhost:11434/v1`, and leave `ApiKey` empty.
 
 ## Installation
 
-You can install this addon two ways:
-
-1. **FreeCAD Addon Manager** — add/update the workbench itself via the Addon
-   Manager as usual.
-2. **Install the `litellm` dependency separately.** `litellm` is **not** on
-   the Addon Manager's Python package allow-list (and pulls in a fairly
-   large dependency tree), so the Addon Manager cannot install it for you.
-   You must install it into FreeCAD's own Python environment yourself:
-
-   ```
-   <freecad-python> -m pip install -r requirements.txt
-   ```
-
-   Then restart FreeCAD. If `litellm` is missing, the workbench will still
-   load, but it prints guidance (see `freecad/llm_copilot/deps.py`) telling
-   you to run the command above.
+Install the workbench through the **FreeCAD Addon Manager** as usual. That's
+the whole install — because the LLM client is standard-library-only, there is
+no separate dependency step, no `pip install`, and no compiled wheels. It works
+on any FreeCAD build, including immutable/Nix installs.
 
 ## Configuration
 
@@ -55,7 +51,7 @@ group. Available settings and their defaults:
 
 | Setting                | Default | Meaning                                                              |
 |-------------------------|---------|------------------------------------------------------------------------|
-| `Model`                 | (empty) | LiteLLM model string, e.g. `anthropic/claude-opus-4-8`                |
+| `Model`                 | (empty) | Prefixed model string, e.g. `anthropic/claude-opus-4-8` (see providers above) |
 | `ApiKey`                 | (empty) | API key for the selected provider                                     |
 | `ApiBase`                | (empty) | Optional custom API base URL (e.g. for a local/self-hosted endpoint)  |
 | `ConfirmBeforeRunning`   | `true`  | Require explicit confirmation of intent before each step runs         |
