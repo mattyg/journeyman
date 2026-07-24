@@ -23,11 +23,17 @@ FIELD_GUIDE = {
         "the actual feature Name from document inspection; doc.XY_Plane and "
         "doc.Body are not valid generic attributes. Sketch attachment commonly "
         "uses AttachmentSupport=[(plane,'')] and MapMode='FlatFace'."),
-    "sketch constraint geometry": (
+    "sketch constraint geometry delete remove clear edit": (
         "Create Sketcher::SketchObject inside the intended Body, add geometry "
         "with addGeometry, and dimensional/geometric constraints with "
-        "Sketcher.Constraint. Recompute and inspect solver/constraint state; "
-        "do not assume geometry indices after deleting elements."),
+        "Sketcher.Constraint. Recompute and inspect solver/constraint state. "
+        "To remove elements use delGeometry(index) and delConstraint(index) — "
+        "there is no clearGeometry or deleteGeometry method. Counts are "
+        "GeometryCount and ConstraintCount; the geometry list is Geometry. "
+        "Indices shift after every deletion, so delete from the highest index "
+        "down, or delete repeatedly at index 0 while a count remains. Removing "
+        "and recreating the whole sketch object is often simpler than editing "
+        "one in place."),
     "pad pocket hole revolve partdesign": (
         "Native PartDesign features should live in one Body and reference the "
         "preceding sketch/feature through their documented link properties. "
