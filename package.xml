@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>LLM Copilot</name>
+  <description>Provider-agnostic LLM copilot for creating and editing CAD models.</description>
+  <version>0.1.0</version>
+  <date>2026-07-23</date>
+  <maintainer email="matt@buildyourweb.app">matt</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+  <url type="repository" branch="main">https://github.com/matt/freecad-llm-plugin</url>
+  <url type="readme">https://github.com/matt/freecad-llm-plugin/blob/main/README.md</url>
+  <content>
+    <workbench>
+      <classname>LLMCopilotWorkbench</classname>
+      <subdirectory>./freecad/llm_copilot/</subdirectory>
+    </workbench>
+  </content>
+  <!-- litellm is not on the Addon Manager python allow-list; it is installed
+       from requirements.txt (see README). Bundling strategy revisited in Task 8. -->
+</package>
