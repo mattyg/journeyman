@@ -89,11 +89,17 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.intentAsked.connect(self._ask_intent, QtCore.Qt.QueuedConnection)
         self.busyChanged.connect(self._set_busy, QtCore.Qt.QueuedConnection)
         self.reasoningReady.connect(self._add_reasoning, QtCore.Qt.QueuedConnection)
-        # Transcript model: list of {"kind": "text"|"reasoning", ...}.
+        # Transcript model: list of {"kind": "text"|"reasoning"|"status", ...}.
         self._entries = []
         self._reason_seq = 0
         self._expanded = set()
         self._busy = False
+        # Live "Thinking… (Ns)" indicator so a slow model call doesn't look frozen.
+        self._status_entry = None
+        self._elapsed = 0
+        self._status_timer = QtCore.QTimer(self)
+        self._status_timer.setInterval(1000)
+        self._status_timer.timeout.connect(self._tick_status)
         # Marshals every FreeCAD access to the main thread (FreeCAD/Qt is not
         # thread-safe; running document scripts off-thread corrupts the GUI).
         self._main = _MainThreadRunner(self)
@@ -130,6 +136,32 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self._entries.append({"kind": "text", "html": text})
         self._render()
 
+    def _start_status(self):
+        """Begin the live 'Thinking…' indicator (call on the GUI thread)."""
+        self._elapsed = 0
+        self._status_entry = {"kind": "status", "text": "Thinking…"}
+        self._entries.append(self._status_entry)
+        self._render()
+        self._status_timer.start()
+
+    def _tick_status(self):
+        if self._status_entry is None:
+            return
+        self._elapsed += 1
+        self._status_entry["text"] = f"Thinking… ({self._elapsed}s)"
+        self._render()
+
+    def _stop_status(self):
+        """Remove the live indicator when the turn finishes (GUI thread)."""
+        self._status_timer.stop()
+        if self._status_entry is not None:
+            try:
+                self._entries.remove(self._status_entry)
+            except ValueError:
+                pass
+            self._status_entry = None
+            self._render()
+
     def _add_reasoning(self, reasoning):
         """Add a collapsible 'Thinking' entry holding the model's reasoning."""
         if not reasoning:
@@ -152,9 +184,15 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _render(self):
         parts = []
-        for e in self._entries:
+        # Render non-status entries in order, then the live status line last so
+        # "Thinking…" always sits at the bottom even as step results stream in.
+        ordered = [e for e in self._entries if e["kind"] != "status"]
+        ordered += [e for e in self._entries if e["kind"] == "status"]
+        for e in ordered:
             if e["kind"] == "text":
                 parts.append(e["html"])
+            elif e["kind"] == "status":
+                parts.append(f'<i>{html.escape(e["text"])}</i>')
             else:
                 rid = e["id"]
                 expanded = rid in self._expanded
@@ -186,6 +224,10 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self._busy = busy
         self.send_btn.setEnabled(not busy)
         self.input.setEnabled(not busy)
+        if busy:
+            self._start_status()
+        else:
+            self._stop_status()
 
     def _on_send(self):
         if self._busy:
@@ -195,9 +237,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
             return
         self.input.clear()
         self._append(f"<b>You:</b> {msg}")
-        self._append("<i>Thinking…</i>")
         self._build_agent()  # pick up latest settings each send
-        self.busyChanged.emit(True)
+        self.busyChanged.emit(True)  # -> _set_busy starts the "Thinking…" timer
 
         def on_intent(intent):
             # Block the worker until the GUI answers, marshaling via a queued
