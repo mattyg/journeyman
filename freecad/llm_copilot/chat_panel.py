@@ -12,6 +12,7 @@ from . import (
 )
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
+from .document_binding import PinnedDocumentApp, run_with_document
 from .markdown import to_html as markdown_to_html
 from .settings import load_settings, model_display_name, PARAM_PATH
 from .transcript_format import (
@@ -146,9 +147,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
     # Ask the user to confirm an intent. Carries a threading.Event + a mutable
     # result dict so the worker can block until the GUI answers, without relying
     # on QTimer.singleShot (which isn't reliably serviced from a worker thread).
-    intentAsked = QtCore.Signal(str, object, object)
+    intentAsked = QtCore.Signal(object, str, object, object)
     # Toggle input/button enabled state from the worker thread.
-    busyChanged = QtCore.Signal(bool)
+    busyChanged = QtCore.Signal(object, bool)
     # Model reasoning text captured from the response (worker -> GUI thread).
     reasoningReady = QtCore.Signal(object, str)
     # Completed script step: document key, intent, Python, ExecResult.
@@ -227,8 +228,6 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self._document_key = None
         self._entries = []
         self._reason_seq = 0
-        self._busy = False
-        self._cancel_event = None
         self.input.setStyleSheet(
             "QLineEdit:disabled {"
             " background-color: palette(midlight);"
@@ -236,10 +235,6 @@ class CopilotDockWidget(QtGui.QDockWidget):
             " border: 2px solid palette(mid);"
             "}")
         # Live "Working… (Ns)" indicator so a slow model call doesn't look frozen.
-        self._status_entry = None
-        self._status_widget = None
-        self._elapsed = 0
-        self._waiting_for_question = False
         self._status_timer = QtCore.QTimer(self)
         self._status_timer.setInterval(1000)
         self._status_timer.timeout.connect(self._tick_status)
@@ -256,17 +251,26 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self._sync_document()
         self._document_timer.start()
 
-    def _new_agent(self, settings):
+    def _new_agent(self, settings, document):
         main = self._main
+
+        app = PinnedDocumentApp(FreeCAD, document)
+
+        def on_document(fn):
+            """Temporarily activate the owning document for GUI-bound helpers."""
+            return run_with_document(FreeCAD, document, fn)
 
         # Wrap FreeCAD-touching calls so they run on the main thread even though
         # the agent loop runs on a worker thread.
         def inspector(app, rich=False):
-            return main.run(lambda: document_inspector.snapshot(app, rich=rich))
+            return main.run(
+                lambda: on_document(
+                    lambda: document_inspector.snapshot(app, rich=rich)))
         inspector.state = lambda app, rich: main.run(
-            lambda: document_inspector.document_state(app, rich=rich))
+            lambda: on_document(
+                lambda: document_inspector.document_state(app, rich=rich)))
         inspector.inspect = lambda app, query: main.run(
-            lambda: document_inspector.inspect(app, query))
+            lambda: on_document(lambda: document_inspector.inspect(app, query)))
         from . import api_reference
         inspector.api_lookup = lambda app, query, module, symbol: main.run(
             lambda: api_reference.lookup(app, query, module, symbol))
@@ -274,16 +278,18 @@ class CopilotDockWidget(QtGui.QDockWidget):
         class _MarshalledExecutor:
             def run(self, app, script, **kwargs):
                 return main.run(
-                    lambda: script_executor.run(app, script, **kwargs))
+                    lambda: on_document(
+                        lambda: script_executor.run(app, script, **kwargs)))
             def undo(self, app):
-                return main.run(lambda: script_executor.undo(app))
+                return main.run(
+                    lambda: on_document(lambda: script_executor.undo(app)))
 
         def capture_views(changed_names, strategy, max_isolated, **options):
-            return main.run(lambda: view_capture.capture(
-                FreeCAD, changed_names, strategy, max_isolated, **options))
+            return main.run(lambda: on_document(lambda: view_capture.capture(
+                FreeCAD, changed_names, strategy, max_isolated, **options)))
 
         return Agent(client=_Client(), inspector=inspector,
-                     executor=_MarshalledExecutor(), app=FreeCAD,
+                     executor=_MarshalledExecutor(), app=app,
                      settings=settings, view_capture=capture_views)
 
     def _active_document_key(self):
@@ -292,10 +298,6 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _sync_document(self):
         """Select (or create) state for the active FreeCAD document."""
-        # Keep callbacks and the live status attached to the document where the
-        # request started. A document change is picked up as soon as it ends.
-        if self._busy:
-            return
         key = self._active_document_key()
         if key == self._document_key:
             return
@@ -308,7 +310,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         if state is None:
             settings = load_settings(FreeCAD.ParamGet(PARAM_PATH))
             doc = getattr(FreeCAD, "ActiveDocument", None)
-            agent = self._new_agent(settings)
+            agent = self._new_agent(settings, doc)
             persistence_enabled = settings.persist_chat_history
             messages, entries = (
                 history_store.load(doc)
@@ -329,6 +331,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 "document": doc,
                 "scroll": 0,
                 "persistence_loaded": persistence_enabled,
+                "busy": False, "cancel_event": None,
+                "status_entry": None, "elapsed": 0,
+                "waiting_for_question": False,
             }
             state["page"], state["layout"] = self._new_transcript_page()
             self._document_states[key] = state
@@ -346,18 +351,21 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _update_controls(self):
         available = getattr(FreeCAD, "ActiveDocument", None) is not None
-        enabled = available and not self._busy
+        state = self._document_states.get(self._document_key, {})
+        busy = bool(state.get("busy"))
+        cancel_event = state.get("cancel_event")
+        enabled = available and not busy
         self.send_btn.setEnabled(enabled)
         self.input.setEnabled(enabled)
         self.attach_btn.setEnabled(enabled)
         self.clear_btn.setEnabled(enabled)
         self.undo_btn.setEnabled(enabled)
-        self.cancel_btn.setVisible(self._busy)
-        self.cancel_btn.setEnabled(self._busy and self._cancel_event is not None
-                                   and not self._cancel_event.is_set())
+        self.cancel_btn.setVisible(busy)
+        self.cancel_btn.setEnabled(
+            busy and cancel_event is not None and not cancel_event.is_set())
         self.input.setPlaceholderText(
             ("Working — press Cancel to stop"
-             if self._busy else
+             if busy else
              ("" if available else "Open or create a document first")))
 
     def _restore_entry_widgets(self, state):
@@ -430,9 +438,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         insert_at = state["layout"].count() - 1
         # Keep the live Working banner at the end of the transcript while
         # context, reasoning, and script results arrive during the turn.
+        status_entry = state.get("status_entry")
         status_widget = (
-            self._status_entry.get("widget")
-            if self._status_entry is not None else None)
+            status_entry.get("widget") if status_entry is not None else None)
         if status_widget is not None and widget is not status_widget:
             status_index = state["layout"].indexOf(status_widget)
             if status_index >= 0:
@@ -727,42 +735,48 @@ class CopilotDockWidget(QtGui.QDockWidget):
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
 
-    def _start_status(self):
+    def _start_status(self, key):
         """Begin the live 'Working…' indicator (call on the GUI thread)."""
-        self._elapsed = 0
-        self._status_entry = {"kind": "status", "text": "Working…"}
-        self._entries.append(self._status_entry)
-        self._status_widget = self._add_entry_widget(
-            self._document_states[self._document_key], self._status_entry)
-        self._status_timer.start()
+        state = self._document_states[key]
+        state["elapsed"] = 0
+        entry = {"kind": "status", "text": "Working…"}
+        state["status_entry"] = entry
+        state["entries"].append(entry)
+        self._add_entry_widget(state, entry)
+        if not self._status_timer.isActive():
+            self._status_timer.start()
 
     def _tick_status(self):
-        if self._status_entry is None:
-            return
-        if self._cancel_event is not None and self._cancel_event.is_set():
-            return
-        if self._waiting_for_question:
-            return
-        self._elapsed += 1
-        self._status_entry["text"] = f"Working… ({self._elapsed}s)"
-        self._status_entry["label"].setText(
-            f'<b>●&nbsp; {html.escape(self._status_entry["text"])}</b>')
+        for state in self._document_states.values():
+            entry = state.get("status_entry")
+            cancel_event = state.get("cancel_event")
+            if (entry is None or state.get("waiting_for_question")
+                    or (cancel_event is not None and cancel_event.is_set())):
+                continue
+            state["elapsed"] += 1
+            entry["text"] = f"Working… ({state['elapsed']}s)"
+            entry["label"].setText(
+                f'<b>●&nbsp; {html.escape(entry["text"])}</b>')
 
-    def _stop_status(self):
+    def _stop_status(self, key):
         """Remove the live indicator when the turn finishes (GUI thread)."""
-        self._status_timer.stop()
-        if self._status_entry is not None:
+        state = self._document_states.get(key)
+        if state is None:
+            return
+        entry = state.get("status_entry")
+        if entry is not None:
             try:
-                self._entries.remove(self._status_entry)
+                state["entries"].remove(entry)
             except ValueError:
                 pass
-            widget = self._status_entry.get("widget")
+            widget = entry.get("widget")
             if widget is not None:
-                state = self._document_states[self._document_key]
                 state["layout"].removeWidget(widget)
                 widget.deleteLater()
-            self._status_entry = None
-            self._status_widget = None
+            state["status_entry"] = None
+        if not any(s.get("status_entry")
+                   for s in self._document_states.values()):
+            self._status_timer.stop()
 
     def _add_reasoning(self, key, reasoning):
         """Add a collapsible 'Thinking' entry holding the model's reasoning."""
@@ -815,10 +829,14 @@ class CopilotDockWidget(QtGui.QDockWidget):
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
 
-    def _ask_intent(self, intent, answer, done):
+    def _ask_intent(self, key, intent, answer, done):
         """GUI-thread slot: show the confirm dialog, store the answer, unblock
         the worker. Invoked via the intentAsked signal (queued from the worker)."""
         try:
+            state = self._document_states.get(key)
+            if state is None:
+                answer["ok"] = False
+                return
             res = QtGui.QMessageBox.question(
                 self, "Run this change?", intent,
                 QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
@@ -832,10 +850,11 @@ class CopilotDockWidget(QtGui.QDockWidget):
         if state is None:
             done.set()
             return
-        self._waiting_for_question = True
-        if self._status_entry is not None:
-            self._status_entry["text"] = "Waiting for your answer…"
-            self._status_entry["label"].setText(
+        state["waiting_for_question"] = True
+        status_entry = state.get("status_entry")
+        if status_entry is not None:
+            status_entry["text"] = "Waiting for your answer…"
+            status_entry["label"].setText(
                 "<b>●&nbsp; Waiting for your answer…</b>")
         entry = {
             "kind": "question",
@@ -852,11 +871,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
             entry["answer"] = list(values)
             answer["value"] = list(values)
             entry.pop("_answer_callback", None)
-            self._waiting_for_question = False
-            if self._status_entry is not None:
-                self._status_entry["text"] = f"Working… ({self._elapsed}s)"
-                self._status_entry["label"].setText(
-                    f"<b>●&nbsp; Working… ({self._elapsed}s)</b>")
+            state["waiting_for_question"] = False
+            if status_entry is not None:
+                status_entry["text"] = (
+                    f"Working… ({state['elapsed']}s)")
+                status_entry["label"].setText(
+                    f"<b>●&nbsp; Working… ({state['elapsed']}s)</b>")
             # Rebuild only this entry so controls become disabled and the
             # persisted selection is visible.
             self._replace_entry_widget(state, entry)
@@ -871,10 +891,11 @@ class CopilotDockWidget(QtGui.QDockWidget):
         if state is None:
             done.set()
             return
-        self._waiting_for_question = True
-        if self._status_entry is not None:
-            self._status_entry["text"] = "Waiting after timeout…"
-            self._status_entry["label"].setText(
+        state["waiting_for_question"] = True
+        status_entry = state.get("status_entry")
+        if status_entry is not None:
+            status_entry["text"] = "Waiting after timeout…"
+            status_entry["label"].setText(
                 "<b>●&nbsp; Waiting after timeout…</b>")
         entry = {
             "kind": "timeout", "message": message, "decision": None,
@@ -886,11 +907,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
             entry["decision"] = bool(retry)
             entry.pop("_timeout_callback", None)
             answer["retry"] = bool(retry)
-            self._waiting_for_question = False
-            if self._status_entry is not None and retry:
-                self._status_entry["text"] = f"Working… ({self._elapsed}s)"
-                self._status_entry["label"].setText(
-                    f"<b>●&nbsp; Working… ({self._elapsed}s)</b>")
+            state["waiting_for_question"] = False
+            if status_entry is not None and retry:
+                status_entry["text"] = (
+                    f"Working… ({state['elapsed']}s)")
+                status_entry["label"].setText(
+                    f"<b>●&nbsp; Working… ({state['elapsed']}s)</b>")
             self._replace_entry_widget(state, entry)
             done.set()
 
@@ -898,41 +920,43 @@ class CopilotDockWidget(QtGui.QDockWidget):
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
 
-    def _set_busy(self, busy):
-        self._busy = busy
+    def _set_busy(self, key, busy):
+        state = self._document_states.get(key)
+        if state is None:
+            return
+        state["busy"] = busy
         if busy:
-            self._start_status()
+            self._start_status(key)
         else:
-            completed_state = self._document_states.get(self._document_key)
-            self._stop_status()
-            self._waiting_for_question = False
-            if completed_state is not None:
-                for entry in completed_state["entries"]:
-                    callback_key = {
-                        "question": "_answer_callback",
-                        "timeout": "_timeout_callback",
-                    }.get(entry.get("kind"))
-                    if callback_key and entry.get(callback_key) is not None:
-                        entry.pop(callback_key, None)
-                        self._replace_entry_widget(completed_state, entry)
-            # Persist the document where the turn began before following any
-            # active-document switch caused by the executed script.
-            self._persist_state(completed_state)
-            self._sync_document()
-            self._update_context_usage()
-            self._cancel_event = None
+            self._stop_status(key)
+            state["waiting_for_question"] = False
+            for entry in state["entries"]:
+                callback_key = {
+                    "question": "_answer_callback",
+                    "timeout": "_timeout_callback",
+                }.get(entry.get("kind"))
+                if callback_key and entry.get(callback_key) is not None:
+                    entry.pop(callback_key, None)
+                    self._replace_entry_widget(state, entry)
+            self._persist_state(state)
+            state["cancel_event"] = None
+            if key == self._document_key:
+                self._update_context_usage()
         self._update_controls()
 
     def _on_cancel(self):
         """Request cancellation at the next safe agent boundary."""
-        if not self._busy or self._cancel_event is None:
+        state = self._document_states.get(self._document_key)
+        if (state is None or not state.get("busy")
+                or state.get("cancel_event") is None):
             return
-        self._cancel_event.set()
+        state["cancel_event"].set()
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.setText("Cancelling…")
-        if self._status_entry is not None:
-            self._status_entry["text"] = "Cancelling…"
-            self._status_entry["label"].setText(
+        status_entry = state.get("status_entry")
+        if status_entry is not None:
+            status_entry["text"] = "Cancelling…"
+            status_entry["label"].setText(
                 "<b>●&nbsp; Cancelling…</b>")
 
     def _on_attach_images(self):
@@ -1012,9 +1036,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
         return images
 
     def _on_send(self):
-        if self._busy:
-            return
         if getattr(FreeCAD, "ActiveDocument", None) is None:
+            return
+        self._sync_document()
+        key = self._document_key
+        state = self._document_states[key]
+        if state["busy"]:
             return
         msg = self.input.text().strip()
         if not msg and not self._pending_images:
@@ -1022,12 +1049,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         if not msg:
             msg = "Please examine the attached image(s)."
         self.input.clear()
-        self._sync_document()
-        key = self._document_key
         agent = self.agent
         settings = load_settings(FreeCAD.ParamGet(PARAM_PATH))
         agent.settings = settings  # preserve history while picking up preferences
-        state = self._document_states[key]
         if (settings.persist_chat_history
                 and not state["persistence_loaded"]
                 and state["document"] is not None):
@@ -1048,19 +1072,17 @@ class CopilotDockWidget(QtGui.QDockWidget):
         model_label = model_display_name(settings.model)
         user_images = self._take_pending_images()
         self._append_user(key, msg, user_images)
-        self._cancel_event = threading.Event()
-        cancel_event = self._cancel_event
+        state["cancel_event"] = threading.Event()
+        cancel_event = state["cancel_event"]
         self.cancel_btn.setText("Cancel")
-        # _on_send already runs on the GUI thread, so mark busy immediately;
-        # this also freezes document selection for the lifetime of the turn.
-        self._set_busy(True)
+        self._set_busy(key, True)
 
         def on_intent(intent):
             # Block the worker until the GUI answers, marshaling via a queued
             # signal (reliable from a non-GUI thread, unlike singleShot).
             answer = {}
             done = threading.Event()
-            self.intentAsked.emit(intent, answer, done)
+            self.intentAsked.emit(key, intent, answer, done)
             done.wait()
             return answer.get("ok", False)
 
@@ -1111,7 +1133,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 self.resultReady.emit(
                     key, f"<b>Error:</b> {html.escape(str(e))}")
             finally:
-                self.busyChanged.emit(False)  # re-enable input on the GUI thread
+                self.busyChanged.emit(
+                    key, False)  # re-enable this document on the GUI thread
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1124,7 +1147,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _on_clear(self):
         """Clear only the active document's model context and transcript."""
-        if self._busy or getattr(FreeCAD, "ActiveDocument", None) is None:
+        state = self._document_states.get(self._document_key)
+        if (state is None or state.get("busy")
+                or getattr(FreeCAD, "ActiveDocument", None) is None):
             return
         answer = QtGui.QMessageBox.question(
             self, "Clear conversation context?",

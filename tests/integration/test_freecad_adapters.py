@@ -8,6 +8,8 @@ from freecad.llm_copilot import view_capture
 from freecad.llm_copilot import history_store
 from freecad.llm_copilot import api_reference
 from freecad.llm_copilot.types import ExecResult
+from freecad.llm_copilot.document_binding import (
+    PinnedDocumentApp, run_with_document)
 
 class InspectorTests(unittest.TestCase):
     def tearDown(self):
@@ -127,6 +129,20 @@ class ExecutorTests(unittest.TestCase):
         self.assertIsNotNone(self.doc.getObject("B"))
         se.undo(App)  # single undo removes it
         self.assertIsNone(self.doc.getObject("B"))
+
+    def test_pinned_agent_edits_owner_and_restores_visible_document(self):
+        visible = App.newDocument("Visible")
+        App.setActiveDocument(visible.Name)
+        pinned = PinnedDocumentApp(App, self.doc)
+        result = run_with_document(
+            App, self.doc,
+            lambda: se.run(
+                pinned,
+                "App.ActiveDocument.addObject('Part::Box','OwnedBox')"))
+        self.assertTrue(result.ok, result.error)
+        self.assertIsNotNone(self.doc.getObject("OwnedBox"))
+        self.assertIsNone(visible.getObject("OwnedBox"))
+        self.assertIs(App.ActiveDocument, visible)
 
     def test_error_aborts_and_reports(self):
         before = len(self.doc.Objects)
