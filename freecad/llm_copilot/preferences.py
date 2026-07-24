@@ -119,6 +119,85 @@ class LLMCopilotPreferencesPage:
         af.addRow("Self-correction attempts", self.retriesSpin)
         outer.addWidget(autonomy)
 
+        conversation = QtGui.QGroupBox("Conversation", self.form)
+        cf = QtGui.QVBoxLayout(conversation)
+        self.persistHistoryCheck = QtGui.QCheckBox(
+            "Persist chat history in FreeCAD documents")
+        self.persistHistoryCheck.setToolTip(
+            "Embed compressed model context and transcript entries in the "
+            ".FCStd file. Clear context removes embedded history even when "
+            "this option is disabled.")
+        cf.addWidget(self.persistHistoryCheck)
+        outer.addWidget(conversation)
+
+        harness = QtGui.QGroupBox("Self-checking harness", self.form)
+        hf = QtGui.QVBoxLayout(harness)
+        flags = [
+            ("validationCheck", "Validate geometry after each script"),
+            ("diffCheck", "Send a structured before/after diff"),
+            ("verificationCheck", "Require verification evidence before finish"),
+            ("inspectionCheck", "Enable read-only document inspection tool"),
+            ("viewsCheck", "Send rendered views to vision-capable models"),
+            ("rollbackCheck", "Roll back changes that fail validation"),
+            ("richSnapshotCheck", "Include rich type-aware document state"),
+        ]
+        for attr, label in flags:
+            widget = QtGui.QCheckBox(label)
+            setattr(self, attr, widget)
+            hf.addWidget(widget)
+        self.viewsCheck.setToolTip(
+            "Renders offscreen views without changing the visible camera. "
+            "Enable only for models that accept image input.")
+        self.edgesCheck = QtGui.QCheckBox(
+            "Overlay dark technical edges")
+        self.objectColorsCheck = QtGui.QCheckBox(
+            "Use stable colors for separate objects")
+        self.depthShadingCheck = QtGui.QCheckBox(
+            "Use depth-enhanced multi-light shading")
+        self.apiLookupCheck = QtGui.QCheckBox(
+            "Enable installed-version FreeCAD API lookup")
+        self.apiLookupCheck.setToolTip(
+            "Lets the model safely inspect modules, symbols, docstrings, and a "
+            "bundled field guide for this installed FreeCAD version. Also "
+            "runs automatically after likely API errors.")
+        hf.addWidget(self.edgesCheck)
+        hf.addWidget(self.objectColorsCheck)
+        hf.addWidget(self.depthShadingCheck)
+        hf.addWidget(self.apiLookupCheck)
+        render_form = QtGui.QFormLayout()
+        self.renderStrategyCombo = QtGui.QComboBox()
+        self.renderStrategyCombo.addItem("Global views only", "global")
+        self.renderStrategyCombo.addItem("Changed elements only", "changed")
+        self.renderStrategyCombo.addItem(
+            "Global + changed elements", "global_and_changed")
+        render_form.addRow("Image capture", self.renderStrategyCombo)
+        self.maxIsolatedSpin = QtGui.QSpinBox()
+        self.maxIsolatedSpin.setRange(0, 20)
+        self.maxIsolatedSpin.setToolTip(
+            "Maximum changed final objects rendered independently per step.")
+        render_form.addRow("Max isolated elements", self.maxIsolatedSpin)
+        hf.addLayout(render_form)
+        outer.addWidget(harness)
+
+        workflow = QtGui.QGroupBox("Structured CAD workflow", self.form)
+        wf = QtGui.QVBoxLayout(workflow)
+        workflow_flags = [
+            ("planningCheck", "Require a structured design plan before editing"),
+            ("parametricCheck", "Prefer editable parametric features"),
+            ("sketchCheck", "Check sketch constraints and attachment"),
+            ("stageCheck", "Guide sketch, additive, subtractive, finish order"),
+            ("ledgerCheck", "Send a compact design ledger on each iteration"),
+            ("finalReviewCheck", "Require a final review against the plan"),
+        ]
+        for attr, label in workflow_flags:
+            widget = QtGui.QCheckBox(label)
+            setattr(self, attr, widget)
+            wf.addWidget(widget)
+        workflow.setToolTip(
+            "Independent experimental controls that encourage a human-like, "
+            "editable CAD design process.")
+        outer.addWidget(workflow)
+
         outer.addStretch(1)
 
         self.providerCombo.currentIndexChanged.connect(self._on_provider_changed)
@@ -142,6 +221,17 @@ class LLMCopilotPreferencesPage:
         self.autoApproveCheck.setChecked(p.GetBool("AutoApproveLoop", False))
         self.maxStepsSpin.setValue(p.GetInt("MaxAutoApprovedSteps", 5))
         self.retriesSpin.setValue(p.GetInt("SelfCorrectionAttempts", 3))
+        self.persistHistoryCheck.setChecked(
+            p.GetBool("PersistChatHistory", True))
+        for widget, key, default in self._harness_controls():
+            widget.setChecked(p.GetBool(key, default))
+        for widget, key, default in self._workflow_controls():
+            widget.setChecked(p.GetBool(key, default))
+        strategy = p.GetString("RenderStrategy", "global_and_changed")
+        strategy_index = self.renderStrategyCombo.findData(strategy)
+        self.renderStrategyCombo.setCurrentIndex(
+            strategy_index if strategy_index >= 0 else 2)
+        self.maxIsolatedSpin.setValue(p.GetInt("MaxIsolatedImages", 4))
         effort = p.GetString("ReasoningEffort", "off")
         ri = self.reasoningCombo.findData(effort)
         if ri >= 0:
@@ -156,6 +246,14 @@ class LLMCopilotPreferencesPage:
         p.SetBool("AutoApproveLoop", self.autoApproveCheck.isChecked())
         p.SetInt("MaxAutoApprovedSteps", self.maxStepsSpin.value())
         p.SetInt("SelfCorrectionAttempts", self.retriesSpin.value())
+        p.SetBool("PersistChatHistory",
+                  self.persistHistoryCheck.isChecked())
+        for widget, key, _default in self._harness_controls():
+            p.SetBool(key, widget.isChecked())
+        for widget, key, _default in self._workflow_controls():
+            p.SetBool(key, widget.isChecked())
+        p.SetString("RenderStrategy", self.renderStrategyCombo.currentData())
+        p.SetInt("MaxIsolatedImages", self.maxIsolatedSpin.value())
         # provider/key/host/model are saved eagerly on edit; persist current
         # values here too so an OK click is always faithful.
         self._save_key()
@@ -167,6 +265,31 @@ class LLMCopilotPreferencesPage:
 
     def _current_provider(self):
         return self.providerCombo.currentData()
+
+    def _harness_controls(self):
+        return [
+            (self.validationCheck, "EnhancedValidation", True),
+            (self.diffCheck, "StructuredDiff", True),
+            (self.verificationCheck, "MandatoryVerification", True),
+            (self.inspectionCheck, "ReadOnlyInspection", True),
+            (self.viewsCheck, "RenderedViews", False),
+            (self.rollbackCheck, "RollbackOnValidationFailure", True),
+            (self.richSnapshotCheck, "RichSnapshot", True),
+            (self.edgesCheck, "TechnicalEdgeOverlay", True),
+            (self.objectColorsCheck, "ColorSeparateObjects", True),
+            (self.depthShadingCheck, "DepthEnhancedShading", True),
+            (self.apiLookupCheck, "FreeCADAPILookup", True),
+        ]
+
+    def _workflow_controls(self):
+        return [
+            (self.planningCheck, "StructuredCADPlanning", True),
+            (self.parametricCheck, "ParametricFeaturePreference", True),
+            (self.sketchCheck, "SketchConstraintVerification", True),
+            (self.stageCheck, "StageOrderGuidance", True),
+            (self.ledgerCheck, "DesignLedgerContext", True),
+            (self.finalReviewCheck, "FinalDesignReview", True),
+        ]
 
     def _sync_provider_fields(self, provider, fetch):
         is_ollama = provider == "ollama"

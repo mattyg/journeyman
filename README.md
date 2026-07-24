@@ -54,6 +54,69 @@ Open **Edit -> Preferences -> LLM Copilot**:
 - **Autonomy** — *Confirm intent before running* (default on), *Auto-approve
   consecutive steps* (default off), *Max auto-approved steps* (default 5),
   *Self-correction attempts* (default 3).
+- **Conversation** — *Persist chat history in FreeCAD documents* (default on).
+  Disable it to prevent embedded history from loading or updating. **Clear
+  context** removes previously embedded history regardless of this preference.
+  When the model needs a consequential clarification, it can present a
+  persistent multiple-choice card with two to five options, descriptions, a
+  recommended choice, and optional multi-selection. Choosing an option resumes
+  the same agent turn; the question and answer remain in document history.
+- **Self-checking harness** — seven independent experiment switches:
+  *Validate geometry*, *Structured before/after diff*, *Require verification
+  evidence*, *Read-only inspection tool*, *Rendered views*, *Rollback failed
+  validation*, and *Rich document state*. Rendered views default off because
+  they require an image-capable model; the other checks default on.
+  Three image-rendering experiments—*Technical edge overlay*, *Stable colors
+  for separate objects*, and *Depth-enhanced multi-light shading*—default on.
+  *Installed-version FreeCAD API lookup* is one consolidated preference. It
+  gives the model safe, bounded access to public module members, signatures,
+  docstrings, the installed version number, and a bundled workflow field guide.
+  Relevant `AttributeError` and `TypeError` failures trigger the same lookup
+  automatically before the model retries.
+  When rendered views are enabled, **Image capture** chooses *Global views
+  only*, *Changed elements only*, or *Global + changed elements*. **Max isolated
+  elements** limits the number of independently rendered changed objects.
+- **Structured CAD workflow** — six independent switches for *Structured design
+  planning*, *Parametric feature preference*, *Sketch constraint checking*,
+  *Stage-order guidance*, *Design-ledger context*, and *Final design review*.
+  These default on. The model declares its construction strategy, ordered
+  feature plan, current stage, active plan step, and measurable success criteria
+  before editing. The approval dialog includes that plan.
+
+When enabled, the harness checks shapes and feature state after execution,
+reports topology, dimensions, volume, dependencies and changed properties,
+and asks the model to correct silent failures. Validation can abort the active
+transaction before an invalid result is committed. A model cannot finish a
+changed task until it returns concrete verification evidence. The inspection
+tool provides detailed state without modifying the document or requesting an
+execution approval. Rendered-view mode supplies one contact sheet containing
+front, back, left, right, top, bottom, and isometric views after successful
+changes, and can add equivalent contact sheets for changed final objects.
+Images are software-rendered from tessellated shapes: the visible camera and
+object visibility are never changed, and capture works under `freecadcmd`
+without an active 3D view or OpenGL context. PartDesign features are represented
+by their containing Body so intermediate features do not produce redundant
+images. The default technical-illustration style uses a warm neutral background,
+depth-tested dark feature edges, deterministic muted colors for distinct
+objects, three-direction lighting, and subtle darkening of recessed geometry.
+Each script result also includes Python standard error and execution-scoped
+warnings/errors emitted through `FreeCAD.Console`. They remain visible in
+FreeCAD while also being shown in the expandable script result and returned to
+the model. Native messages that bypass both Python and standard error cannot be
+captured by FreeCAD's headless Python API.
+
+Structured workflow mode guides the model through analysis, sketch/base
+construction, additive features, subtractive features, finishing, and
+verification while allowing inapplicable stages to be skipped. It does not
+blindly require sketches: Part primitives, surface workflows, inspection, and
+careful modification of an existing feature tree remain explicit strategies.
+After each successful script, the model receives a compact design ledger and
+warnings about unconstrained or unattached Part Design sketches, opaque
+features, and operations inconsistent with the declared stage. Completion
+requires the model to report that it reviewed the result against the plan and
+success criteria. When verification evidence is enabled, that evidence must
+also be concrete. A separate verify-stage tool call is not required, avoiding
+repeated `finish`/review cycles.
 
 Settings are stored under `BaseApp/Preferences/Mod/LLMCopilot`.
 
@@ -64,11 +127,32 @@ Settings are stored under `BaseApp/Preferences/Mod/LLMCopilot`.
 2. Launch FreeCAD (the copilot is not a workbench — it loads on startup and is
    available in every workbench).
 3. Set your model and API key via **Edit -> Preferences -> LLM Copilot**.
-4. Show the panel via **View -> Panels -> LLM Copilot** (it starts hidden).
-5. Type: `make a 10mm cube`.
-6. Confirm the proposed intent.
-7. Verify a cube appears in the 3D view.
-8. Click **Undo last change** and verify the cube is removed.
+4. Create or open a FreeCAD document. Chat controls remain disabled when no
+   document is active.
+5. Show the panel via **View -> Panels -> LLM Copilot** (it starts hidden).
+6. Type: `make a 10mm cube`.
+7. Confirm the proposed intent.
+8. Verify a cube appears in the 3D view.
+9. Click **Undo last change** and verify the cube is removed.
+
+The panel keeps a separate conversation for each open document. Its context
+line shows an approximate token and message count, including the system prompt
+and tool definitions. **Clear context** resets only the active document's
+conversation and transcript; it does not change or undo the FreeCAD model.
+Conversation context and transcript entries are compressed into a hidden
+internal object in the FreeCAD document, so saving and reopening the `.FCStd`
+restores the chat. Clearing context removes that embedded history.
+Each model call also adds a minimized **Context sent to model** entry to the
+transcript. Expanding it shows the newly-added system, document, validation,
+diff, inspection, and verification messages, with any rendered contact sheets
+displayed inline.
+
+Use **Attach images…** to add up to eight PNG, JPEG, WebP, GIF, or BMP files to
+a message. Attachments appear as removable previews, are resized to at most
+1600 pixels, normalized to PNG, displayed in the transcript/context, and sent
+with the user's text. When conversation persistence is enabled, the normalized
+image data is embedded with the document history rather than referenced by its
+original filesystem path.
 
 ## Running the tests
 

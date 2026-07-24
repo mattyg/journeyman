@@ -46,12 +46,60 @@ def test_openai_parses_tool_call(monkeypatch):
     assert captured["url"] == "https://api.openai.com/v1/chat/completions"
 
 
+def test_structured_workflow_fields_are_required_and_parsed(monkeypatch):
+    captured = {}
+    args = {
+        "script": "pass", "intent": "Create base sketch",
+        "strategy": "part_design", "stage": "sketch",
+        "plan": ["Sketch profile", "Pad profile"],
+        "plan_step": 1,
+        "success_criteria": ["One valid solid"],
+    }
+    _patch_http(monkeypatch, _openai_response(args), captured)
+    settings = _settings()
+    settings.structured_cad_planning = True
+    proposal = lc.complete([], settings)
+    assert proposal.strategy == "part_design"
+    assert proposal.stage == "sketch"
+    assert proposal.plan == ("Sketch profile", "Pad profile")
+    run = next(t["function"] for t in captured["payload"]["tools"]
+               if t["function"]["name"] == "run_freecad_script")
+    assert {"strategy", "stage", "plan", "plan_step",
+            "success_criteria"} <= set(
+        run["parameters"]["required"])
+
+
 def test_openai_forces_tool_choice(monkeypatch):
     captured = {}
     _patch_http(monkeypatch,
                 _openai_response({"intent": "x", "script": "pass"}), captured)
     lc.complete([{"role": "user", "content": "box"}], _settings())
     assert captured["payload"]["tool_choice"] == "required"
+
+
+def test_inspection_tool_can_be_disabled(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch,
+                _openai_response({"intent": "x", "script": "pass"}), captured)
+    settings = _settings()
+    settings.read_only_inspection = False
+    lc.complete([], settings)
+    names = [t["function"]["name"] for t in captured["payload"]["tools"]]
+    assert "inspect_document" not in names
+
+
+def test_verification_contract_can_be_disabled(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch,
+                _openai_response({"intent": "x", "script": "pass"}), captured)
+    settings = _settings()
+    settings.mandatory_verification = False
+    lc.complete([], settings)
+    finish = next(t["function"] for t in captured["payload"]["tools"]
+                  if t["function"]["name"] == "finish")
+    assert finish["parameters"]["required"] == ["summary"]
+    assert "verified" not in finish["parameters"]["properties"]
+    assert "verified" not in captured["payload"]["messages"][0]["content"]
 
 
 def test_openai_parses_finish_tool(monkeypatch):
@@ -64,6 +112,84 @@ def test_openai_parses_finish_tool(monkeypatch):
     assert p.is_tool_call is False
     assert p.kind == "finish"
     assert p.text == "All done."
+
+
+def test_openai_parses_verification_evidence(monkeypatch):
+    captured = {}
+    args = {"summary": "Done", "verified": True,
+            "evidence": ["one valid solid", "10 mm bounds"]}
+    resp = {"choices": [{"message": {"content": None, "tool_calls": [{
+        "function": {"name": "finish", "arguments": json.dumps(args)}}]}}]}
+    _patch_http(monkeypatch, resp, captured)
+    p = lc.complete([], _settings())
+    assert p.verified is True
+    assert p.evidence == ("one valid solid", "10 mm bounds")
+
+
+def test_openai_parses_read_only_inspection(monkeypatch):
+    captured = {}
+    resp = {"choices": [{"message": {"content": None, "tool_calls": [{
+        "function": {"name": "inspect_document",
+                     "arguments": json.dumps({"query": "box dimensions"})}}]}}]}
+    _patch_http(monkeypatch, resp, captured)
+    p = lc.complete([], _settings())
+    assert p.kind == "inspect"
+    assert p.query == "box dimensions"
+
+
+def test_openai_parses_multiple_choice_question(monkeypatch):
+    captured = {}
+    args = {
+        "question": "Which mounting style?",
+        "options": [
+            {"id": "flush", "label": "Flush",
+             "description": "Keep the mount level with the face."},
+            {"id": "raised", "label": "Raised",
+             "description": "Leave the mount above the face."},
+        ],
+        "recommended_option": "flush",
+        "allow_multiple": False,
+    }
+    response = {"choices": [{"message": {"content": None, "tool_calls": [{
+        "function": {"name": "ask_user",
+                     "arguments": json.dumps(args)}}]}}]}
+    _patch_http(monkeypatch, response, captured)
+    proposal = lc.complete([], _settings())
+    assert proposal.kind == "question"
+    assert proposal.question == "Which mounting style?"
+    assert proposal.options[0]["id"] == "flush"
+    assert proposal.recommended_option == "flush"
+    assert proposal.allow_multiple is False
+
+
+def test_openai_parses_freecad_api_lookup(monkeypatch):
+    captured = {}
+    args = {
+        "query": "How is a sketch attached?",
+        "module": "Sketcher",
+        "symbol": "Sketch",
+    }
+    response = {"choices": [{"message": {"content": None, "tool_calls": [{
+        "function": {"name": "lookup_freecad_api",
+                     "arguments": json.dumps(args)}}]}}]}
+    _patch_http(monkeypatch, response, captured)
+    proposal = lc.complete([], _settings())
+    assert proposal.kind == "api_lookup"
+    assert proposal.api_module == "Sketcher"
+    assert proposal.api_symbol == "Sketch"
+
+
+def test_freecad_api_lookup_can_be_disabled(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch,
+                _openai_response({"intent": "x", "script": "pass"}), captured)
+    settings = _settings()
+    settings.freecad_api_lookup = False
+    lc.complete([], settings)
+    names = [tool["function"]["name"]
+             for tool in captured["payload"]["tools"]]
+    assert "lookup_freecad_api" not in names
+    assert "lookup_freecad_api" not in captured["payload"]["messages"][0]["content"]
 
 
 def test_openai_plain_text_when_no_tool_call(monkeypatch):
@@ -156,6 +282,26 @@ def test_anthropic_parses_tool_use(monkeypatch):
     assert all(m["role"] != "system" for m in captured["payload"]["messages"])
 
 
+def test_anthropic_parses_multiple_choice_question(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "tool_use", "name": "ask_user", "input": {
+            "question": "Which side?",
+            "options": [
+                {"id": "left", "label": "Left", "description": "Use left."},
+                {"id": "right", "label": "Right", "description": "Use right."},
+            ],
+            "recommended_option": "left",
+            "allow_multiple": True,
+        }},
+    ]), captured)
+    proposal = lc.complete(
+        [], _settings(model="anthropic/claude-opus-4-8"))
+    assert proposal.kind == "question"
+    assert proposal.options[1]["id"] == "right"
+    assert proposal.allow_multiple is True
+
+
 def test_anthropic_captures_thinking_and_sends_config(monkeypatch):
     captured = {}
     _patch_http(monkeypatch, _anthropic_response([
@@ -216,6 +362,24 @@ def test_anthropic_plain_text(monkeypatch):
     assert p.is_tool_call is False
     assert p.text == "Done — looks right?"
     assert p.script == ""
+
+
+def test_anthropic_translates_openai_style_data_images(monkeypatch):
+    captured = {}
+    _patch_http(monkeypatch, _anthropic_response([
+        {"type": "tool_use", "name": "finish",
+         "input": {"summary": "seen"}}]), captured)
+    messages = [{"role": "user", "content": [
+        {"type": "text", "text": "view"},
+        {"type": "image_url",
+         "image_url": {"url": "data:image/png;base64,YWJj"}},
+    ]}]
+    lc.complete(messages, _settings(model="anthropic/claude-opus-4-8"))
+    image = captured["payload"]["messages"][0]["content"][1]
+    assert image == {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "YWJj"},
+    }
 
 
 # ---- list_models ----

@@ -6,6 +6,7 @@ PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/LLMCopilot"
 
 # Providers the settings UI knows about. Order is the dropdown order.
 PROVIDERS = ("anthropic", "openai", "openrouter", "ollama")
+RENDER_STRATEGIES = ("global", "changed", "global_and_changed")
 
 # Human-readable labels for the provider dropdown.
 PROVIDER_LABELS = {
@@ -61,6 +62,26 @@ class Settings:
     max_auto_approved_steps: int
     self_correction_attempts: int
     reasoning_effort: str = "off"   # off | low | medium | high (provider-dependent)
+    enhanced_validation: bool = True
+    structured_diff: bool = True
+    mandatory_verification: bool = True
+    read_only_inspection: bool = True
+    rendered_views: bool = False
+    rollback_on_validation_failure: bool = True
+    rich_snapshot: bool = True
+    render_strategy: str = "global_and_changed"
+    max_isolated_images: int = 4
+    persist_chat_history: bool = True
+    structured_cad_planning: bool = False
+    parametric_feature_preference: bool = False
+    sketch_constraint_verification: bool = False
+    stage_order_guidance: bool = False
+    design_ledger_context: bool = False
+    final_design_review: bool = False
+    technical_edge_overlay: bool = False
+    color_separate_objects: bool = False
+    depth_enhanced_shading: bool = False
+    freecad_api_lookup: bool = True
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -219,6 +240,10 @@ def model_display_name(model: str) -> str:
 def load_settings(param_get) -> "Settings":
     provider = get_provider(param_get)
     bare_model = get_model_for_provider(param_get, provider)
+    render_strategy = param_get.GetString(
+        "RenderStrategy", "global_and_changed")
+    if render_strategy not in RENDER_STRATEGIES:
+        render_strategy = "global_and_changed"
     return Settings(
         model=_resolve_model(provider, bare_model),
         api_key=get_api_key(param_get, provider),
@@ -228,6 +253,34 @@ def load_settings(param_get) -> "Settings":
         max_auto_approved_steps=param_get.GetInt("MaxAutoApprovedSteps", 5),
         self_correction_attempts=param_get.GetInt("SelfCorrectionAttempts", 3),
         reasoning_effort=param_get.GetString("ReasoningEffort", "off"),
+        enhanced_validation=param_get.GetBool("EnhancedValidation", True),
+        structured_diff=param_get.GetBool("StructuredDiff", True),
+        mandatory_verification=param_get.GetBool("MandatoryVerification", True),
+        read_only_inspection=param_get.GetBool("ReadOnlyInspection", True),
+        rendered_views=param_get.GetBool("RenderedViews", False),
+        rollback_on_validation_failure=param_get.GetBool(
+            "RollbackOnValidationFailure", True),
+        rich_snapshot=param_get.GetBool("RichSnapshot", True),
+        render_strategy=render_strategy,
+        max_isolated_images=max(
+            0, min(20, param_get.GetInt("MaxIsolatedImages", 4))),
+        persist_chat_history=param_get.GetBool("PersistChatHistory", True),
+        structured_cad_planning=param_get.GetBool(
+            "StructuredCADPlanning", True),
+        parametric_feature_preference=param_get.GetBool(
+            "ParametricFeaturePreference", True),
+        sketch_constraint_verification=param_get.GetBool(
+            "SketchConstraintVerification", True),
+        stage_order_guidance=param_get.GetBool("StageOrderGuidance", True),
+        design_ledger_context=param_get.GetBool("DesignLedgerContext", True),
+        final_design_review=param_get.GetBool("FinalDesignReview", True),
+        technical_edge_overlay=param_get.GetBool(
+            "TechnicalEdgeOverlay", True),
+        color_separate_objects=param_get.GetBool(
+            "ColorSeparateObjects", True),
+        depth_enhanced_shading=param_get.GetBool(
+            "DepthEnhancedShading", True),
+        freecad_api_lookup=param_get.GetBool("FreeCADAPILookup", True),
     )
 
 
@@ -240,6 +293,31 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetBool("AutoApproveLoop", settings.auto_approve_loop)
     param_get.SetInt("MaxAutoApprovedSteps", settings.max_auto_approved_steps)
     param_get.SetInt("SelfCorrectionAttempts", settings.self_correction_attempts)
+    param_get.SetBool("EnhancedValidation", settings.enhanced_validation)
+    param_get.SetBool("StructuredDiff", settings.structured_diff)
+    param_get.SetBool("MandatoryVerification", settings.mandatory_verification)
+    param_get.SetBool("ReadOnlyInspection", settings.read_only_inspection)
+    param_get.SetBool("RenderedViews", settings.rendered_views)
+    param_get.SetBool("RollbackOnValidationFailure",
+                      settings.rollback_on_validation_failure)
+    param_get.SetBool("RichSnapshot", settings.rich_snapshot)
+    param_get.SetString("RenderStrategy", settings.render_strategy)
+    param_get.SetInt("MaxIsolatedImages", settings.max_isolated_images)
+    param_get.SetBool("PersistChatHistory", settings.persist_chat_history)
+    param_get.SetBool("StructuredCADPlanning", settings.structured_cad_planning)
+    param_get.SetBool(
+        "ParametricFeaturePreference", settings.parametric_feature_preference)
+    param_get.SetBool(
+        "SketchConstraintVerification", settings.sketch_constraint_verification)
+    param_get.SetBool("StageOrderGuidance", settings.stage_order_guidance)
+    param_get.SetBool("DesignLedgerContext", settings.design_ledger_context)
+    param_get.SetBool("FinalDesignReview", settings.final_design_review)
+    param_get.SetBool("TechnicalEdgeOverlay", settings.technical_edge_overlay)
+    param_get.SetBool(
+        "ColorSeparateObjects", settings.color_separate_objects)
+    param_get.SetBool(
+        "DepthEnhancedShading", settings.depth_enhanced_shading)
+    param_get.SetBool("FreeCADAPILookup", settings.freecad_api_lookup)
     if "/" in settings.model:
         provider, bare = settings.model.split("/", 1)
         if provider in PROVIDERS:

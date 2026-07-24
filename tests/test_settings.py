@@ -27,6 +27,26 @@ def test_defaults_when_unset():
     assert s.auto_approve_loop is False
     assert s.max_auto_approved_steps == 5
     assert s.self_correction_attempts == 3
+    assert s.enhanced_validation is True
+    assert s.structured_diff is True
+    assert s.mandatory_verification is True
+    assert s.read_only_inspection is True
+    assert s.rendered_views is False
+    assert s.rollback_on_validation_failure is True
+    assert s.rich_snapshot is True
+    assert s.render_strategy == "global_and_changed"
+    assert s.max_isolated_images == 4
+    assert s.persist_chat_history is True
+    assert s.structured_cad_planning is True
+    assert s.parametric_feature_preference is True
+    assert s.sketch_constraint_verification is True
+    assert s.stage_order_guidance is True
+    assert s.design_ledger_context is True
+    assert s.final_design_review is True
+    assert s.technical_edge_overlay is True
+    assert s.color_separate_objects is True
+    assert s.depth_enhanced_shading is True
+    assert s.freecad_api_lookup is True
 
 
 def test_per_provider_keys_are_isolated():
@@ -110,3 +130,50 @@ def test_autonomy_settings_roundtrip():
     # save_settings mirrored the resolved model back into provider slots
     assert get_provider(p) == "openrouter"
     assert s.model == "openrouter/anthropic/claude-opus-4-8"
+
+
+def test_harness_feature_flags_roundtrip():
+    p = FakeParam()
+    settings = load_settings(p)
+    settings.enhanced_validation = False
+    settings.structured_diff = False
+    settings.mandatory_verification = False
+    settings.read_only_inspection = False
+    settings.rendered_views = True
+    settings.rollback_on_validation_failure = False
+    settings.rich_snapshot = False
+    settings.render_strategy = "changed"
+    settings.max_isolated_images = 2
+    settings.persist_chat_history = False
+    settings.structured_cad_planning = False
+    settings.parametric_feature_preference = False
+    settings.sketch_constraint_verification = False
+    settings.stage_order_guidance = False
+    settings.design_ledger_context = False
+    settings.final_design_review = False
+    settings.technical_edge_overlay = False
+    settings.color_separate_objects = False
+    settings.depth_enhanced_shading = False
+    settings.freecad_api_lookup = False
+    save_settings(p, settings)
+    loaded = load_settings(p)
+    assert loaded.enhanced_validation is False
+    assert loaded.structured_diff is False
+    assert loaded.mandatory_verification is False
+    assert loaded.read_only_inspection is False
+    assert loaded.rendered_views is True
+    assert loaded.rollback_on_validation_failure is False
+    assert loaded.rich_snapshot is False
+    assert loaded.render_strategy == "changed"
+    assert loaded.max_isolated_images == 2
+    assert loaded.persist_chat_history is False
+    assert loaded.structured_cad_planning is False
+    assert loaded.parametric_feature_preference is False
+    assert loaded.sketch_constraint_verification is False
+    assert loaded.stage_order_guidance is False
+    assert loaded.design_ledger_context is False
+    assert loaded.final_design_review is False
+    assert loaded.technical_edge_overlay is False
+    assert loaded.color_separate_objects is False
+    assert loaded.depth_enhanced_shading is False
+    assert loaded.freecad_api_lookup is False
