@@ -13,7 +13,14 @@ class _Client:
         return llm_client.complete(messages, settings)
 
 class CopilotDockWidget(QtGui.QDockWidget):
+    # Append a line to the log (worker -> GUI thread; Qt queues cross-thread).
     resultReady = QtCore.Signal(str)
+    # Ask the user to confirm an intent. Carries a threading.Event + a mutable
+    # result dict so the worker can block until the GUI answers, without relying
+    # on QTimer.singleShot (which isn't reliably serviced from a worker thread).
+    intentAsked = QtCore.Signal(str, object, object)
+    # Toggle input/button enabled state from the worker thread.
+    busyChanged = QtCore.Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__("LLM Copilot", parent)
@@ -33,6 +40,13 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.input.returnPressed.connect(self._on_send)  # Enter sends
         self.undo_btn.clicked.connect(self._on_undo)
         self.resultReady.connect(self._append)
+        self.intentAsked.connect(self._ask_intent)  # runs on the GUI thread
+        self.busyChanged.connect(self._set_busy)
+        self._busy = False
+        # Route client diagnostics to the FreeCAD report view so a "no response"
+        # can be traced (e.g. model replied with text instead of a tool call).
+        llm_client.DEBUG_LOG = lambda m: FreeCAD.Console.PrintMessage(
+            "[LLM Copilot] " + m + "\n")
         self._build_agent()
 
     def _build_agent(self):
@@ -45,25 +59,40 @@ class CopilotDockWidget(QtGui.QDockWidget):
     def _append(self, text):
         self.log.append(text)
 
+    def _ask_intent(self, intent, answer, done):
+        """GUI-thread slot: show the confirm dialog, store the answer, unblock
+        the worker. Invoked via the intentAsked signal (queued from the worker)."""
+        try:
+            res = QtGui.QMessageBox.question(
+                self, "Run this change?", intent,
+                QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
+            answer["ok"] = (res == QtGui.QMessageBox.Yes)
+        finally:
+            done.set()
+
+    def _set_busy(self, busy):
+        self._busy = busy
+        self.send_btn.setEnabled(not busy)
+        self.input.setEnabled(not busy)
+
     def _on_send(self):
+        if self._busy:
+            return
         msg = self.input.text().strip()
         if not msg:
             return
         self.input.clear()
         self._append(f"<b>You:</b> {msg}")
+        self._append("<i>Thinking…</i>")
         self._build_agent()  # pick up latest settings each send
+        self.busyChanged.emit(True)
 
         def on_intent(intent):
-            # Ask on the GUI thread; block worker until answered.
+            # Block the worker until the GUI answers, marshaling via a queued
+            # signal (reliable from a non-GUI thread, unlike singleShot).
             answer = {}
             done = threading.Event()
-            def ask():
-                res = QtGui.QMessageBox.question(
-                    self, "Run this change?", intent,
-                    QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
-                answer["ok"] = (res == QtGui.QMessageBox.Yes)
-                done.set()
-            QtCore.QTimer.singleShot(0, ask)
+            self.intentAsked.emit(intent, answer, done)
             done.wait()
             return answer.get("ok", False)
 
@@ -74,9 +103,14 @@ class CopilotDockWidget(QtGui.QDockWidget):
         def work():
             try:
                 out = self.agent.send(msg, on_intent, on_result)
+                self.resultReady.emit(f"<b>Copilot:</b> {out}")
             except Exception as e:
-                out = f"Error: {e}"
-            self.resultReady.emit(f"<b>Copilot:</b> {out}")
+                import traceback
+                FreeCAD.Console.PrintError(
+                    "LLM Copilot error:\n" + traceback.format_exc())
+                self.resultReady.emit(f"<b>Error:</b> {e}")
+            finally:
+                self.busyChanged.emit(False)  # re-enable input on the GUI thread
 
         threading.Thread(target=work, daemon=True).start()
 

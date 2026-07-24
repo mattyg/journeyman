@@ -90,6 +90,21 @@ class LLMError(Exception):
     """Raised when the provider request fails or returns an unusable response."""
 
 
+# Optional diagnostic sink. The GUI sets this to route trace lines to the
+# FreeCAD console; kept as a plain callable so this module needs no FreeCAD
+# import. No-op by default.
+DEBUG_LOG = None
+
+
+def _debug(msg: str) -> None:
+    cb = DEBUG_LOG
+    if cb is not None:
+        try:
+            cb(msg)
+        except Exception:
+            pass
+
+
 def _http_post_json(url: str, headers: dict, payload: dict,
                     timeout: float = COMPLETION_TIMEOUT) -> dict:
     """POST a JSON body and parse a JSON response, using only the stdlib.
@@ -217,10 +232,12 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
     tool_calls = message.get("tool_calls")
     if tool_calls:
         args = json.loads(tool_calls[0]["function"]["arguments"])
+        _debug("openai: tool_call run_freecad_script")
         return LLMProposal(intent=args.get("intent", ""),
                            script=args.get("script", ""),
                            text=message.get("content") or "",
                            is_tool_call=True)
+    _debug("openai: no tool_call; text=%r" % ((message.get("content") or "")[:120]))
     return LLMProposal(intent="", script="",
                        text=message.get("content") or "",
                        is_tool_call=False)
