@@ -707,6 +707,26 @@ def test_missing_assumption_ledger_is_corrected_before_execution():
             lambda _r, _s, _i, _p: None)
     assert out == "Done"
     assert not executor.results
+    # A first step carrying no ledger at all is met by the ledger-first ask.
+    assert any("[assumptions and plan first]" in str(call)
+               for call in client.calls)
+
+
+def test_malformed_assumption_ledger_is_corrected_before_execution():
+    """The reactive gate still catches a ledger that is present but invalid."""
+    bad = (_assumption(confidence="certain"),)  # not one of high/medium/low
+    client = FakeClient([
+        LLMProposal("build", "pass", "", True, assumptions=bad),
+        LLMProposal("build", "pass", "", True, assumptions=(_assumption(),)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(assumption_ledger=True, auto_approve_loop=True)).send(
+            "make it", lambda _intent: True, lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert not executor.results
     assert any("[assumption ledger required]" in str(call)
                for call in client.calls)
 
@@ -1180,3 +1200,74 @@ def test_building_script_still_faces_the_planning_gates():
             lambda _r, _s, _i, _p: None,
             on_tool_result=lambda tool, summary, content: shown.append(content))
     assert any(text.startswith("[Part Design required]") for text in shown)
+
+
+def _assumption(**kw):
+    row = {
+        "id": "plate_thickness", "name": "Plate thickness", "value": 4.0,
+        "unit": "mm", "source": "reference image", "confidence": "medium",
+        "consequence": "medium", "status": "unverified", "evidence": "",
+        "if_wrong": "plate strength changes",
+    }
+    row.update(kw)
+    return row
+
+
+def test_first_building_step_is_sent_back_for_assumptions_and_a_plan():
+    """Harness Stage 2: no geometry before the assumption ledger exists."""
+    build = "body = doc.addObject('PartDesign::Body', 'B')"
+    client = FakeClient([
+        LLMProposal("start building", build, "", True),
+        LLMProposal(
+            "start building", build, "", True,
+            assumptions=(_assumption(),)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    shown = []
+    agent = _agent(
+        client, executor,
+        _settings(auto_approve_loop=True, assumption_ledger=True))
+    out = agent.send(
+        "model a hanger", lambda _intent: True, lambda _r, _s, _i, _p: None,
+        on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert out == "Done"
+    asks = [t for t in shown if t.startswith("[assumptions and plan first]")]
+    assert len(asks) == 1, "the ledger-first turn must fire exactly once"
+    # Shown to the user is exactly what the model was told.
+    assert asks[0] in [
+        m["content"] for m in agent.messages if m["role"] == "user"]
+    # It ran only after the ledger arrived — the first attempt never executed.
+    assert not executor.results
+
+
+def test_ledger_first_does_not_fire_when_the_model_leads_with_a_ledger():
+    client = FakeClient([
+        LLMProposal(
+            "start building", "body = doc.addObject('PartDesign::Body', 'B')",
+            "", True, assumptions=(_assumption(),)),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings(auto_approve_loop=True, assumption_ledger=True)).send(
+            "model it", lambda _intent: True, lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert not [t for t in shown if t.startswith("[assumptions and plan first]")]
+
+
+def test_ledger_first_never_blocks_a_diagnostic():
+    client = FakeClient([
+        LLMProposal("diagnose", "print(doc.Objects)\n", "", True, strategy=""),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    shown = []
+    _agent(
+        client, FakeExecutor([ExecResult(True, "[]", "")]),
+        _settings(auto_approve_loop=True, assumption_ledger=True,
+                  mandatory_verification=False, final_design_review=False)).send(
+            "what is in here", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool_result=lambda tool, summary, content: shown.append(content))
+    assert not [t for t in shown if t.startswith("[")]

@@ -124,6 +124,23 @@ def fidelity_required(issues):
         "omission approval.")
 
 
+def ledger_first():
+    """Ask for assumptions and a feature-tree plan before any geometry.
+
+    Injected once per turn, before the first constructing script runs. An
+    assumption corrected here costs one line; the same assumption corrected
+    after the tree is built costs a rebuild (harness Stage 2).
+    """
+    return _gate(
+        "assumptions and plan first", (),
+        "Before building, resubmit this step carrying: (1) an assumption "
+        "ledger — every numeric value not given in the request, sorted by the "
+        "severity of being wrong, with source, confidence, consequence, and "
+        "status; and (2) the ordered feature-tree plan you intend to build, "
+        "with this script as its first step. Use [] for the ledger only if "
+        "the request fixes every dimension. The document has not been edited.")
+
+
 def repeated_failure(kind, attempts):
     """The same feature has failed the same way ``attempts`` times running."""
     return _gate(

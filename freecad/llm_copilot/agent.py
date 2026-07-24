@@ -66,6 +66,9 @@ class _Turn:
         # cosmetically. See _feature_signature.
         self.feature_signature = None
         self.feature_failures = 0
+        # The ledger-first turn is injected at most once per turn, so a model
+        # that declines to supply a ledger meets the normal gate, not a loop.
+        self.ledger_first_requested = False
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -523,6 +526,19 @@ class Agent:
                     ledger["plan"] = proposal.plan
                 if proposal.success_criteria:
                     ledger["success_criteria"] = proposal.success_criteria
+
+            # Stage 2 of the harness: the first constructing step of a turn is
+            # sent back once, unexecuted, to collect assumptions and a plan.
+            # Cheaper to correct a wrong assumption now than to rebuild the
+            # tree around it later.
+            if (self.settings.assumption_ledger and not diagnostic
+                    and not turn.ledger_first_requested
+                    and turn.ledger.get("assumptions") is None
+                    and proposal.assumptions is None):
+                turn.ledger_first_requested = True
+                self._reject(
+                    turn_protocol.ledger_first(), proposal, on_tool_result)
+                continue
 
             if (self.settings.assumption_ledger and not diagnostic
                     and not turn.assumptions_accepted):
