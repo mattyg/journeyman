@@ -2,7 +2,6 @@
 import base64
 import html
 import os
-import re
 import threading
 from PySide import QtGui, QtCore
 import FreeCAD
@@ -15,6 +14,10 @@ from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
 from .markdown import to_html as markdown_to_html
 from .settings import load_settings, model_display_name, PARAM_PATH
+from .transcript_format import (
+    wrappable_escape as _wrappable_escape,
+    wrapped_pre as _wrapped_pre,
+)
 
 class _Client:
     def complete(self, messages, settings):
@@ -59,31 +62,6 @@ class _ResponsiveImageLabel(QtGui.QLabel):
         target = min(max(1, width), self._source.width())
         self.setPixmap(self._source.scaledToWidth(
             target, QtCore.Qt.SmoothTransformation))
-
-
-def _wrappable_escape(text, chunk=48):
-    """Escape text and add display-only breaks inside unusually long tokens."""
-    parts = []
-    for part in re.split(r"(\s+)", str(text or "")):
-        if not part or part.isspace():
-            parts.append(html.escape(part))
-            continue
-        parts.append("&#8203;".join(
-            html.escape(part[index:index + chunk])
-            for index in range(0, len(part), chunk)))
-    return "".join(parts)
-
-
-def _wrapped_pre(text):
-    """Monospace, newline-preserving HTML that remains word-wrappable."""
-    lines = []
-    for line in str(text or "").splitlines():
-        leading = len(line) - len(line.lstrip(" "))
-        lines.append(
-            "&nbsp;" * leading + _wrappable_escape(line[leading:]))
-    return ('<div style="font-family:monospace;white-space:normal;'
-            'word-wrap:break-word;">'
-            + "<br>".join(lines) + "</div>")
 
 
 class _DisclosureHeader(QtGui.QWidget):
@@ -425,6 +403,25 @@ class CopilotDockWidget(QtGui.QDockWidget):
     def _scroll_to_bottom(self):
         bar = self.log.verticalScrollBar()
         bar.setValue(bar.maximum())
+
+    def _replace_entry_widget(self, state, entry):
+        """Rebuild one entry's widget in place, preserving its position.
+
+        Used whenever an entry's rendering changes after it was first shown
+        (a question is answered, a timeout is decided, controls are disabled at
+        end of turn). Consolidates the find-index / insert / remove / delete
+        ritual that was previously copied across several handlers.
+        """
+        old_widget = entry.get("widget")
+        if old_widget is None:
+            return None
+        index = state["layout"].indexOf(old_widget)
+        replacement = self._create_entry_widget(entry)
+        state["layout"].insertWidget(index, replacement)
+        state["layout"].removeWidget(old_widget)
+        old_widget.deleteLater()
+        entry["widget"] = replacement
+        return replacement
 
     def _add_entry_widget(self, state, entry):
         follow = (state is self._document_states.get(self._document_key)
@@ -862,14 +859,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     f"<b>●&nbsp; Working… ({self._elapsed}s)</b>")
             # Rebuild only this entry so controls become disabled and the
             # persisted selection is visible.
-            old_widget = entry.get("widget")
-            if old_widget is not None:
-                index = state["layout"].indexOf(old_widget)
-                replacement = self._question_widget(entry)
-                state["layout"].insertWidget(index, replacement)
-                state["layout"].removeWidget(old_widget)
-                old_widget.deleteLater()
-                entry["widget"] = replacement
+            self._replace_entry_widget(state, entry)
             done.set()
 
         entry["_answer_callback"] = selected
@@ -901,14 +891,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 self._status_entry["text"] = f"Working… ({self._elapsed}s)"
                 self._status_entry["label"].setText(
                     f"<b>●&nbsp; Working… ({self._elapsed}s)</b>")
-            old_widget = entry.get("widget")
-            if old_widget is not None:
-                index = state["layout"].indexOf(old_widget)
-                replacement = self._timeout_widget(entry)
-                state["layout"].insertWidget(index, replacement)
-                state["layout"].removeWidget(old_widget)
-                old_widget.deleteLater()
-                entry["widget"] = replacement
+            self._replace_entry_widget(state, entry)
             done.set()
 
         entry["_timeout_callback"] = decided
@@ -931,16 +914,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     }.get(entry.get("kind"))
                     if callback_key and entry.get(callback_key) is not None:
                         entry.pop(callback_key, None)
-                        old_widget = entry.get("widget")
-                        if old_widget is not None:
-                            index = completed_state["layout"].indexOf(
-                                old_widget)
-                            replacement = self._create_entry_widget(entry)
-                            completed_state["layout"].insertWidget(
-                                index, replacement)
-                            completed_state["layout"].removeWidget(old_widget)
-                            old_widget.deleteLater()
-                            entry["widget"] = replacement
+                        self._replace_entry_widget(completed_state, entry)
             # Persist the document where the turn began before following any
             # active-document switch caused by the executed script.
             self._persist_state(completed_state)
