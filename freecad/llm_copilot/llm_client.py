@@ -355,7 +355,7 @@ _ANTHROPIC_DEFAULT_BASE = "https://api.anthropic.com/v1"
 # unreachable endpoint — which would hang the model-list fetch and the chat
 # call. Listing models is a quick metadata call; completions can take longer.
 MODELS_TIMEOUT = 15
-COMPLETION_TIMEOUT = 120
+COMPLETION_TIMEOUT = 300
 
 
 @dataclass
@@ -400,6 +400,10 @@ class LLMError(Exception):
     """Raised when the provider request fails or returns an unusable response."""
 
 
+class LLMTimeoutError(LLMError):
+    """Raised when a completion exceeds the provider request timeout."""
+
+
 # Optional diagnostic sink. The GUI sets this to route trace lines to the
 # FreeCAD console; kept as a plain callable so this module needs no FreeCAD
 # import. No-op by default.
@@ -437,11 +441,13 @@ def _http_post_json(url: str, headers: dict, payload: dict,
             pass
         raise LLMError(f"HTTP {exc.code} from {url}: {detail}") from exc
     except socket.timeout as exc:
-        raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
+        raise LLMTimeoutError(
+            f"Timed out after {timeout}s contacting {url}") from exc
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
         if isinstance(reason, socket.timeout):
-            raise LLMError(f"Timed out after {timeout}s contacting {url}") from exc
+            raise LLMTimeoutError(
+                f"Timed out after {timeout}s contacting {url}") from exc
         raise LLMError(f"Could not reach {url}: {reason}") from exc
     return json.loads(body)
 

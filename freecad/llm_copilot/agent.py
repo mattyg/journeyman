@@ -44,8 +44,9 @@ class Agent:
 
     def send(self, user_message, on_intent, on_result, on_reasoning=None,
              on_context=None, user_images=None, cancel_event=None,
-             on_question=None) -> str:
+             on_question=None, on_timeout=None) -> str:
         from . import document_inspector, cad_workflow
+        from .llm_client import LLMTimeoutError
 
         def check_cancelled():
             if cancel_event is not None and cancel_event.is_set():
@@ -97,7 +98,19 @@ class Agent:
                 on_context(context_messages)
                 context_cursor = len(self.messages)
             check_cancelled()
-            proposal = self.client.complete(self.messages, self.settings)
+            try:
+                proposal = self.client.complete(self.messages, self.settings)
+            except LLMTimeoutError as exc:
+                if on_timeout is not None and on_timeout(str(exc)):
+                    check_cancelled()
+                    continue
+                check_cancelled()
+                note = (
+                    "Stopped after the model request timed out. Your request "
+                    "and conversation context have been preserved.")
+                self.messages.append(
+                    {"role": "assistant", "content": note})
+                return note
             # A stdlib urllib request cannot safely be killed from another
             # thread. Discard its response before any script or UI action.
             check_cancelled()

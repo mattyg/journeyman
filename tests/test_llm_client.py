@@ -17,6 +17,10 @@ def _patch_http(monkeypatch, response, captured):
     monkeypatch.setattr(lc, "_http_post_json", fake_post)
 
 
+def test_completion_timeout_allows_high_reasoning_requests():
+    assert lc.COMPLETION_TIMEOUT == 300
+
+
 # ---- OpenAI-compatible adapter (OpenAI / Ollama / OpenRouter) ----
 
 def _openai_response(tool_args=None, content=None):

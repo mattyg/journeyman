@@ -180,6 +180,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
     # Structured clarification question: document key, proposal, answer box,
     # completion event.
     questionAsked = QtCore.Signal(object, object, object, object)
+    timeoutAsked = QtCore.Signal(object, str, object, object)
 
     def __init__(self, parent=None):
         super().__init__("LLM Copilot", parent)
@@ -240,6 +241,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.contextReady.connect(self._add_context, QtCore.Qt.QueuedConnection)
         self.questionAsked.connect(
             self._ask_question, QtCore.Qt.QueuedConnection)
+        self.timeoutAsked.connect(
+            self._ask_timeout, QtCore.Qt.QueuedConnection)
         # Transcript model: list of {"kind": "text"|"reasoning"|"status", ...}.
         # Each FreeCAD document owns an independent agent and transcript.
         self._document_states = {}
@@ -561,7 +564,38 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 entry["intent"], step_content)
         if kind == "question":
             return self._question_widget(entry)
+        if kind == "timeout":
+            return self._timeout_widget(entry)
         return self._context_widget(entry)
+
+    def _timeout_widget(self, entry):
+        box = QtGui.QFrame()
+        box.setFrameShape(QtGui.QFrame.StyledPanel)
+        layout = QtGui.QVBoxLayout(box)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.addWidget(self._rich_label(
+            "<b>Model request timed out</b><p>"
+            + _wrappable_escape(entry["message"]) + "</p>"))
+        decision = entry.get("decision")
+        callback = entry.get("_timeout_callback")
+        if decision is None and callback is not None:
+            row = QtGui.QHBoxLayout()
+            retry = QtGui.QPushButton("Retry same request")
+            stop = QtGui.QPushButton("Stop")
+            retry.clicked.connect(
+                lambda _checked=False: callback(True))
+            stop.clicked.connect(
+                lambda _checked=False: callback(False))
+            row.addWidget(retry)
+            row.addWidget(stop)
+            layout.addLayout(row)
+        else:
+            text = (
+                "Retrying the same request…"
+                if decision is True else
+                "Stopped. The conversation context was preserved.")
+            layout.addWidget(self._rich_label("<i>" + text + "</i>"))
+        return box
 
     def _question_widget(self, entry):
         box = QtGui.QFrame()
@@ -842,6 +876,45 @@ class CopilotDockWidget(QtGui.QDockWidget):
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
 
+    def _ask_timeout(self, key, message, answer, done):
+        state = self._document_states.get(key)
+        if state is None:
+            done.set()
+            return
+        self._waiting_for_question = True
+        if self._status_entry is not None:
+            self._status_entry["text"] = "Waiting after timeout…"
+            self._status_entry["label"].setText(
+                "<b>●&nbsp; Waiting after timeout…</b>")
+        entry = {
+            "kind": "timeout", "message": message, "decision": None,
+        }
+
+        def decided(retry):
+            if done.is_set():
+                return
+            entry["decision"] = bool(retry)
+            entry.pop("_timeout_callback", None)
+            answer["retry"] = bool(retry)
+            self._waiting_for_question = False
+            if self._status_entry is not None and retry:
+                self._status_entry["text"] = f"Working… ({self._elapsed}s)"
+                self._status_entry["label"].setText(
+                    f"<b>●&nbsp; Working… ({self._elapsed}s)</b>")
+            old_widget = entry.get("widget")
+            if old_widget is not None:
+                index = state["layout"].indexOf(old_widget)
+                replacement = self._timeout_widget(entry)
+                state["layout"].insertWidget(index, replacement)
+                state["layout"].removeWidget(old_widget)
+                old_widget.deleteLater()
+                entry["widget"] = replacement
+            done.set()
+
+        entry["_timeout_callback"] = decided
+        state["entries"].append(entry)
+        self._add_entry_widget(state, entry)
+
     def _set_busy(self, busy):
         self._busy = busy
         if busy:
@@ -852,14 +925,17 @@ class CopilotDockWidget(QtGui.QDockWidget):
             self._waiting_for_question = False
             if completed_state is not None:
                 for entry in completed_state["entries"]:
-                    if (entry.get("kind") == "question"
-                            and entry.get("_answer_callback") is not None):
-                        entry.pop("_answer_callback", None)
+                    callback_key = {
+                        "question": "_answer_callback",
+                        "timeout": "_timeout_callback",
+                    }.get(entry.get("kind"))
+                    if callback_key and entry.get(callback_key) is not None:
+                        entry.pop(callback_key, None)
                         old_widget = entry.get("widget")
                         if old_widget is not None:
                             index = completed_state["layout"].indexOf(
                                 old_widget)
-                            replacement = self._question_widget(entry)
+                            replacement = self._create_entry_widget(entry)
                             completed_state["layout"].insertWidget(
                                 index, replacement)
                             completed_state["layout"].removeWidget(old_widget)
@@ -1033,12 +1109,22 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     break
             return answer.get("value", [])
 
+        def on_timeout(message):
+            answer = {}
+            done = threading.Event()
+            self.timeoutAsked.emit(key, message, answer, done)
+            while not done.wait(0.1):
+                if cancel_event.is_set():
+                    done.set()
+                    break
+            return answer.get("retry", False)
+
         def work():
             try:
                 out = agent.send(
                     msg, on_intent, on_result, on_reasoning, on_context,
                     user_images=user_images, cancel_event=cancel_event,
-                    on_question=on_question)
+                    on_question=on_question, on_timeout=on_timeout)
                 self.resultReady.emit(
                     key, f"<b>{html.escape(model_label)}:</b>"
                     + markdown_to_html(out))

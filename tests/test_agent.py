@@ -5,6 +5,7 @@ from freecad.llm_copilot.agent import Agent
 from freecad.llm_copilot.agent import AgentCancelled
 from freecad.llm_copilot.types import ExecResult
 from freecad.llm_copilot.llm_client import LLMProposal
+from freecad.llm_copilot.llm_client import LLMTimeoutError
 from freecad.llm_copilot.settings import Settings
 
 class FakeClient:
@@ -302,6 +303,41 @@ def test_api_error_triggers_automatic_lookup_before_retry():
     assert out == "Fixed."
     assert "[automatic installed-version API lookup]" in str(client.calls[1])
     assert "OriginFeatures" in str(client.calls[1])
+
+
+def test_timeout_retry_continues_same_turn_without_duplicate_user_message():
+    class TimeoutThenFinish:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, messages, settings):
+            self.calls.append([dict(message) for message in messages])
+            if len(self.calls) == 1:
+                raise LLMTimeoutError("Timed out after 300s")
+            return LLMProposal("", "", "Finished after retry.", False)
+
+    client = TimeoutThenFinish()
+    decisions = []
+    out = _agent(client, FakeExecutor([]), _settings()).send(
+        "make bracket", lambda i: True, lambda r, s, i, p: None,
+        on_timeout=lambda message: decisions.append(message) or True)
+    assert out == "Finished after retry."
+    assert decisions == ["Timed out after 300s"]
+    assert len(client.calls) == 2
+    assert client.calls[0] == client.calls[1]
+
+
+def test_timeout_stop_preserves_context_and_ends_turn():
+    class AlwaysTimeout:
+        def complete(self, messages, settings):
+            raise LLMTimeoutError("Timed out after 300s")
+
+    agent = _agent(AlwaysTimeout(), FakeExecutor([]), _settings())
+    out = agent.send(
+        "make bracket", lambda i: True, lambda r, s, i, p: None,
+        on_timeout=lambda _message: False)
+    assert "context have been preserved" in out
+    assert "make bracket" in str(agent.messages)
 
 
 def test_reviewed_plan_finish_does_not_require_an_extra_verify_tool_call():

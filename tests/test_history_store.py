@@ -46,3 +46,15 @@ def test_execution_diagnostics_roundtrip():
         "script": "pass", "result": result,
     }]))
     assert restored[0]["result"] == result
+
+
+def test_timeout_decision_persists_without_live_callback():
+    entry = {
+        "kind": "timeout", "message": "Timed out after 300s",
+        "decision": True, "_timeout_callback": object(),
+    }
+    _messages, restored = decode(encode([], [entry]))
+    assert restored == [{
+        "kind": "timeout", "message": "Timed out after 300s",
+        "decision": True,
+    }]

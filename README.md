@@ -120,6 +120,12 @@ repeated `finish`/review cycles.
 
 Settings are stored under `BaseApp/Preferences/Mod/LLMCopilot`.
 
+Completion requests use a five-minute timeout to accommodate high-reasoning
+models and image-heavy context. If a request still times out, the chat presents
+**Retry same request** and **Stop** controls. Retry keeps the existing agent turn
+and does not append a duplicate user message; Stop preserves the conversation
+so the user can continue later.
+
 ## Manual smoke test
 
 1. Symlink this repository into FreeCAD's `Mod` directory (e.g.
