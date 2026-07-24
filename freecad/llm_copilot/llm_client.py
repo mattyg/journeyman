@@ -64,9 +64,11 @@ SYSTEM_PROMPT = (
     "are body.Origin.OriginFeatures (or reference them by their real Name shown "
     "in the snapshot). A sketch attaches via "
     "sketch.AttachmentSupport = [(plane, '')]; sketch.MapMode = 'FlatFace'.\n"
-    "- For simple solids, prefer the Part module: e.g. "
-    "box = doc.addObject('Part::Box','Box'); box.Length=10 ... — it needs no "
-    "Body or sketch.\n"
+    "- Always build editable geometry with Part Design: create a "
+    "PartDesign::Body, attach sketches to origin planes or datums, constrain "
+    "them, and use native Part Design features such as Pad, Pocket, Hole, "
+    "Revolution, and AdditivePipe. Do not use Part primitives, Part::Feature, "
+    "Shape assignment, or Part boolean shortcuts for model construction.\n"
     "- Refer to existing objects by the exact Name shown in the snapshot; do not "
     "guess attribute names. Prefer editing existing objects over rebuilding.\n"
     "- Never delete or modify Origin, origin planes, or origin axes to resolve "
@@ -81,9 +83,8 @@ _WORKFLOW_PROMPT = (
     "- Work like a careful human CAD designer: analyze references, make a "
     "feature-level plan, build stable sketches/base forms, add material, remove "
     "material, apply finishing features last, then measure and review.\n"
-    "- Choose the appropriate strategy. Use Part Design for sketch-driven "
-    "parametric components, Part primitives/booleans for genuinely simple "
-    "construction, and preserve an existing feature tree when modifying it.\n"
+    "- Use the part_design strategy and preserve an existing native feature "
+    "tree when modifying it.\n"
     "- Give meaningful names to bodies, sketches, parameters, and features. "
     "Prefer datum/origin references over fragile generated-face references.\n"
 )
@@ -117,6 +118,20 @@ _FIDELITY_MEANINGS = {
         "keep the gesture, discard surface detail, and ignore extra reference "
         "detail"),
     "functional_analogue": "match function rather than appearance",
+}
+
+_FIDELITY_FEATURE_ITEM = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "description": {"type": "string"},
+        "status": {
+            "type": "string",
+            "enum": [
+                "planned", "implemented", "user_approved_omission", "blocked"]},
+        "evidence": {"type": "string"},
+    },
+    "required": ["id", "description", "status", "evidence"],
 }
 
 _INFERRED_PROMPT = (
@@ -160,9 +175,8 @@ _TOOL_PARAMETERS = {
                    "description": "FreeCAD Python to execute."},
         "strategy": {
             "type": "string",
-            "enum": ["part_design", "part", "surface", "modify_existing",
-                     "inspection"],
-            "description": "The CAD construction strategy chosen for this task."},
+            "enum": ["part_design"],
+            "description": "The required native Part Design construction strategy."},
         "stage": {
             "type": "string",
             "enum": ["analyze", "sketch", "additive", "subtractive",
@@ -178,7 +192,7 @@ _TOOL_PARAMETERS = {
             "type": "array", "items": {"type": "string"},
             "description": "Measurable checks that define a correct result."},
     },
-    "required": ["intent", "script"],
+    "required": ["intent", "script", "strategy"],
 }
 
 _FINISH_NAME = "finish"
@@ -334,6 +348,15 @@ def _system_prompt(settings):
         if meaning:
             prompt += (
                 f"- Fidelity target: {settings.fidelity_target}; {meaning}.\n")
+    if settings.fidelity_target == "replica":
+        prompt += (
+            "- Replica fidelity is enforced. Enumerate every visible or "
+            "described feature in observed_features and keep stable ids on "
+            "every script call. Implementation difficulty is not permission to "
+            "flatten, straighten, merge, approximate, or omit a feature. Change "
+            "construction strategy instead. If omission is genuinely necessary, "
+            "ask_user first and record user_approved_omission with evidence. "
+            "Do not finish while a feature is planned or blocked.\n")
     if settings.mark_inferred_features:
         prompt += _INFERRED_PROMPT
     if settings.final_design_review:
@@ -380,6 +403,23 @@ def _openai_tools(settings):
         script["parameters"]["properties"]["assumptions"] = {
             "type": "array", "items": copy.deepcopy(_ASSUMPTION_ITEM)}
         script["parameters"]["required"].append("assumptions")
+    if settings.fidelity_target == "replica":
+        script = next(t["function"] for t in tools
+                      if t["function"]["name"] == _TOOL_NAME)
+        script["parameters"]["properties"]["observed_features"] = {
+            "type": "array", "minItems": 1,
+            "items": copy.deepcopy(_FIDELITY_FEATURE_ITEM)}
+        script["parameters"]["required"].append("observed_features")
+        finish = next(t["function"] for t in tools
+                      if t["function"]["name"] == _FINISH_NAME)
+        finish["parameters"]["properties"]["fidelity_met"] = {
+            "type": "boolean",
+            "description": "True only when every tracked replica feature is resolved."}
+        finish["parameters"]["properties"]["fidelity_omissions"] = {
+            "type": "array", "items": {"type": "string"},
+            "description": "Stable ids of user-approved omissions; empty otherwise."}
+        finish["parameters"]["required"] += [
+            "fidelity_met", "fidelity_omissions"]
     if settings.final_design_review:
         script = next(t["function"] for t in tools
                       if t["function"]["name"] == _TOOL_NAME)
@@ -425,12 +465,15 @@ class LLMProposal:
     verified: bool = False
     evidence: tuple = ()
     query: str = ""
-    strategy: str = ""
+    strategy: str = "part_design"
     stage: str = ""
     plan: tuple = ()
     plan_step: int = 0
     success_criteria: tuple = ()
     assumptions: object = None
+    observed_features: object = None
+    fidelity_met: bool = False
+    fidelity_omissions: tuple = ()
     reviewed_plan: bool = False
     question: str = ""
     options: tuple = ()
@@ -637,20 +680,27 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
         return LLMProposal(
             intent=args.get("intent", ""), script=args.get("script", ""),
             text=text, is_tool_call=True, reasoning=reasoning, kind="script",
-            strategy=args.get("strategy", ""), stage=args.get("stage", ""),
+            strategy=args.get("strategy", "part_design"),
+            stage=args.get("stage", ""),
             plan=tuple(args.get("plan") or ()),
             plan_step=int(args.get("plan_step") or 0),
             success_criteria=tuple(args.get("success_criteria") or ()),
             assumptions=tuple(
                 dict(row) for row in (args.get("assumptions") or ())
-                if isinstance(row, dict)))
+                if isinstance(row, dict)),
+            observed_features=tuple(
+                dict(row) for row in (args.get("observed_features") or ())
+                if isinstance(row, dict))
+            if "observed_features" in args else None)
     if name == _FINISH_NAME:
         return LLMProposal(
             intent="", script="", text=args.get("summary", "") or text,
             is_tool_call=False, reasoning=reasoning, kind="finish",
             verified=bool(args.get("verified")),
             evidence=tuple(args.get("evidence") or ()),
-            reviewed_plan=bool(args.get("reviewed_plan")))
+            reviewed_plan=bool(args.get("reviewed_plan")),
+            fidelity_met=bool(args.get("fidelity_met")),
+            fidelity_omissions=tuple(args.get("fidelity_omissions") or ()))
     if name == _INSPECT_NAME:
         return LLMProposal(
             "", "", "", False, reasoning=reasoning, kind="inspect",

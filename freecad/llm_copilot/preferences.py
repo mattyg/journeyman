@@ -196,11 +196,20 @@ class LLMCopilotPreferencesPage:
             wf.addWidget(widget)
         fidelity_form = QtGui.QFormLayout()
         self.fidelityCombo = QtGui.QComboBox()
-        self.fidelityCombo.addItem("Unspecified", "unspecified")
-        self.fidelityCombo.addItem("Replica", "replica")
-        self.fidelityCombo.addItem("Stylised", "stylised")
         self.fidelityCombo.addItem(
-            "Functional analogue", "functional_analogue")
+            "Unspecified — model decides", "unspecified")
+        self.fidelityCombo.addItem(
+            "Replica — preserve every visible feature", "replica")
+        self.fidelityCombo.addItem(
+            "Stylised — preserve silhouette, simplify details", "stylised")
+        self.fidelityCombo.addItem(
+            "Functional analogue — preserve function, not appearance",
+            "functional_analogue")
+        self.fidelityCombo.setToolTip(
+            "Replica tracks every observed feature and requires explicit user "
+            "approval before an omission. Stylised preserves the recognizable "
+            "shape while simplifying detail. Functional analogue preserves the "
+            "job the object performs rather than its appearance.")
         fidelity_form.addRow("Fidelity target", self.fidelityCombo)
         wf.addLayout(fidelity_form)
         self.inferredCheck = QtGui.QCheckBox(

@@ -44,6 +44,49 @@ def test_single_step_then_done():
     assert intents == ["add a box"]
     assert "Done" in out
 
+
+def test_tool_callback_reports_script_before_execution():
+    client = FakeClient([
+        LLMProposal("add native feature", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    seen = []
+    _agent(
+        client, FakeExecutor([ExecResult(True, "", "")]),
+        _settings()).send(
+            "make it", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool=lambda tool, summary, details:
+            seen.append((tool, summary, details)))
+    assert seen == [(
+        "run_freecad_script", "add native feature", "pass")]
+
+
+def test_tool_callback_reports_inspection_and_api_lookup():
+    client = FakeClient([
+        LLMProposal(
+            "", "", "", False, kind="inspect", query="Sketch.Support"),
+        LLMProposal(
+            "", "", "", False, kind="api_lookup",
+            api_query="Pad length property", api_module="PartDesign",
+            api_symbol="Pad"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    inspector = lambda _app: "DOC"
+    inspector.inspect = lambda _app, query: "inspection:" + query
+    inspector.api_lookup = lambda _app, q, m, s: f"api:{m}.{s}:{q}"
+    seen = []
+    Agent(
+        client, inspector, FakeExecutor([]), object(), _settings()).send(
+            "inspect", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_tool=lambda tool, summary, details:
+            seen.append((tool, summary, details)))
+    assert seen == [
+        ("inspect_document", "Sketch.Support", "Sketch.Support"),
+        ("lookup_freecad_api", "PartDesign.Pad", "Pad length property"),
+    ]
+
 def test_gate_rejection_stops_without_executing():
     client = FakeClient([LLMProposal("add a box", "import Part", "", True)])
     ex = FakeExecutor([])
@@ -379,7 +422,12 @@ def test_rendered_views_are_added_as_multimodal_context():
     inspector = lambda app: "DOC"
     states = iter([
         {"objects": {}},
-        {"objects": {"Box": {"type": "Part::Box"}}},
+        {"objects": {
+            "Body": {"type": "PartDesign::Body"},
+            "Sketch": {
+                "type": "Sketcher::SketchObject", "body": "Body"},
+            "Pad": {"type": "PartDesign::Pad", "body": "Body"},
+        }},
     ])
     inspector.state = lambda app, rich: next(states)
     agent = Agent(
@@ -387,12 +435,12 @@ def test_rendered_views_are_added_as_multimodal_context():
         executor=FakeExecutor([ExecResult(True, "", "")]), app=object(),
         settings=_settings(rendered_views=True, auto_approve_loop=True),
         view_capture=lambda changed, strategy, limit: [
-            {"label": "Box only", "data": "cG5n"}])
+            {"label": "Pad only", "data": "cG5n"}])
     agent.send("box", lambda i: True, lambda r, s, i, p: None)
     image_messages = [
         m for m in client.calls[-1] if isinstance(m["content"], list)]
     assert image_messages[0]["content"][2]["image_url"]["url"].endswith("cG5n")
-    assert image_messages[0]["content"][1]["text"] == "Box only"
+    assert image_messages[0]["content"][1]["text"] == "Pad only"
 
 
 def test_unchanged_step_does_not_resend_snapshot_or_images():
@@ -528,6 +576,142 @@ def test_missing_assumption_ledger_is_corrected_before_execution():
     assert out == "Done"
     assert not executor.results
     assert any("[assumption ledger required]" in str(call)
+               for call in client.calls)
+
+
+def _feature(status="planned", evidence=""):
+    return {
+        "id": "lower_bend", "description": "Bent lower clip",
+        "status": status, "evidence": evidence,
+    }
+
+
+def test_replica_blocks_difficult_feature_omission_before_execution():
+    client = FakeClient([
+        LLMProposal(
+            "make flat approximation", "pass", "", True,
+            observed_features=(_feature("blocked"),)),
+        LLMProposal(
+            "model the bend", "pass", "", True,
+            observed_features=(_feature(),)),
+        LLMProposal(
+            "verify bend", "pass", "", True,
+            observed_features=(
+                _feature("implemented", "Measured 25 degree bend"),)),
+        LLMProposal(
+            "", "", "Done", False, kind="finish",
+            fidelity_met=True, fidelity_omissions=()),
+    ])
+    executor = FakeExecutor([
+        ExecResult(True, "", ""), ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(fidelity_target="replica", auto_approve_loop=True)).send(
+            "replicate hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert not executor.results
+    assert any("[replica fidelity required]" in str(call)
+               for call in client.calls)
+
+
+def test_replica_finish_rejected_while_feature_is_only_planned():
+    client = FakeClient([
+        LLMProposal(
+            "start bend", "pass", "", True,
+            observed_features=(_feature(),)),
+        LLMProposal(
+            "", "", "Done early", False, kind="finish",
+            fidelity_met=True, fidelity_omissions=()),
+        LLMProposal(
+            "finish bend", "pass", "", True,
+            observed_features=(
+                _feature("implemented", "Measured 25 degree bend"),)),
+        LLMProposal(
+            "", "", "Done", False, kind="finish",
+            fidelity_met=True, fidelity_omissions=()),
+    ])
+    executor = FakeExecutor([
+        ExecResult(True, "", ""), ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(fidelity_target="replica", auto_approve_loop=True)).send(
+            "replicate hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert any("[replica fidelity required]" in str(call)
+               for call in client.calls)
+
+
+def test_replica_omission_requires_explicit_question_round():
+    omitted = _feature(
+        "user_approved_omission", "User selected omit bend")
+    options = (
+        {"id": "model", "label": "Model bend", "description": "Full replica"},
+        {"id": "omit", "label": "Omit bend", "description": "Simpler model"},
+    )
+    client = FakeClient([
+        LLMProposal(
+            "omit bend", "pass", "", True,
+            observed_features=(omitted,)),
+        LLMProposal(
+            "", "", "", False, kind="question",
+            question="May I omit the bend?", options=options),
+        LLMProposal(
+            "build approved flat form", "pass", "", True,
+            observed_features=(omitted,)),
+        LLMProposal(
+            "", "", "Done", False, kind="finish",
+            fidelity_met=True, fidelity_omissions=("lower_bend",)),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "")])
+    out = _agent(
+        client, executor,
+        _settings(fidelity_target="replica", auto_approve_loop=True)).send(
+            "replicate hanger", lambda _intent: True,
+            lambda _r, _s, _i, _p: None,
+            on_question=lambda _proposal: ["omit"])
+    assert out == "Done"
+    assert not executor.results
+
+
+def test_part_workbench_step_is_rolled_back_and_rebuilt_natively():
+    states = iter([
+        {"objects": {}},
+        {"objects": {"Box": {"type": "Part::Box", "label": "Box"}}},
+        {"objects": {}},
+        {"objects": {
+            "Body": {"type": "PartDesign::Body", "label": "Body"},
+            "Sketch": {
+                "type": "Sketcher::SketchObject", "label": "Sketch",
+                "body": "Body"},
+            "Pad": {
+                "type": "PartDesign::Pad", "label": "Pad", "body": "Body"},
+        }},
+    ])
+
+    def inspector(_app):
+        return "DOC"
+
+    inspector.state = lambda _app, _rich: next(states)
+    client = FakeClient([
+        LLMProposal(
+            "shortcut", "pass", "", True, strategy="part_design"),
+        LLMProposal(
+            "native pad", "pass", "", True, strategy="part_design"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([
+        ExecResult(True, "", ""), ExecResult(True, "", "")])
+    agent = Agent(
+        client, inspector, executor, object(),
+        _settings(auto_approve_loop=True))
+    out = agent.send(
+        "make box", lambda _intent: True,
+        lambda _r, _s, _i, _p: None)
+    assert out == "Done"
+    assert executor.undos == 1
+    assert any("[Part Design violation" in str(call)
                for call in client.calls)
 
 

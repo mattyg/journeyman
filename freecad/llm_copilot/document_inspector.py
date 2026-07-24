@@ -53,6 +53,13 @@ def document_state(app, rich=True):
         if is_internal_object(obj):
             continue
         item = {"type": obj.TypeId, "label": obj.Label}
+        try:
+            parent_body = obj.getParentGeoFeatureGroup()
+        except Exception:
+            parent_body = None
+        if (parent_body is not None
+                and getattr(parent_body, "TypeId", "") == "PartDesign::Body"):
+            item["body"] = parent_body.Name
         origin_features = _origin_plane_names(obj)
         if origin_features:
             item["origin_features"] = origin_features

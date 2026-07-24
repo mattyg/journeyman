@@ -104,6 +104,8 @@ def test_structured_workflow_fields_are_required_and_parsed(monkeypatch):
     assert {"strategy", "stage", "plan", "plan_step",
             "success_criteria"} <= set(
         run["parameters"]["required"])
+    assert run["parameters"]["properties"]["strategy"]["enum"] == [
+        "part_design"]
 
 
 def test_assumption_schema_is_gated_and_rows_are_parsed():
@@ -140,6 +142,20 @@ def test_assumption_fidelity_and_inferred_prompt_fragments_are_gated():
     assert "numeric value not supplied" in prompt
     assert "Fidelity target: stylised" in prompt
     assert "INFERRED" in prompt
+
+
+def test_replica_schema_requires_observed_features_and_fidelity_finish():
+    settings = _settings()
+    settings.fidelity_target = "replica"
+    tools = lc._openai_tools(settings)
+    script = next(t["function"] for t in tools
+                  if t["function"]["name"] == "run_freecad_script")
+    finish = next(t["function"] for t in tools
+                  if t["function"]["name"] == "finish")
+    assert "observed_features" in script["parameters"]["required"]
+    assert {"fidelity_met", "fidelity_omissions"} <= set(
+        finish["parameters"]["required"])
+    assert "difficulty is not permission" in lc.system_prompt(settings)
 
 
 def test_openai_forces_tool_choice(monkeypatch):

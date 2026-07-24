@@ -56,6 +56,10 @@ class _Turn:
         self.assumptions_accepted = False
         self.assumption_clarification = False
         self.assumption_questions = 0
+        self.fidelity_retries = 0
+        self.fidelity_clarification = False
+        self.fidelity_questions = 0
+        self.part_design_retries = 0
         self.ledger = {
             "strategy": "", "stage": "analyze", "plan": (),
             "success_criteria": (), "completed_stages": set(),
@@ -228,7 +232,19 @@ class Agent:
         review_missing = (
             self.settings.final_design_review and turn.executed_steps
             and not proposal.reviewed_plan)
-        if verification_missing or review_missing:
+        fidelity_missing = False
+        if self.settings.fidelity_target == "replica" and turn.executed_steps:
+            features = turn.ledger.get("observed_features", ())
+            approved = {
+                row["id"] for row in features
+                if row.get("status") == "user_approved_omission"}
+            unresolved = [
+                row["id"] for row in features
+                if row.get("status") in ("planned", "blocked")]
+            fidelity_missing = (
+                not features or unresolved or not proposal.fidelity_met
+                or set(proposal.fidelity_omissions) != approved)
+        if verification_missing or review_missing or fidelity_missing:
             turn.completion_retries += 1
             # A schema-conforming model normally fixes this in one
             # response. Do not burn tokens repeatedly calling finish.
@@ -249,11 +265,18 @@ class Agent:
                 requirements.append(
                     "compare every plan step and success criterion with "
                     "the finished model, then set reviewed_plan=true")
+            if fidelity_missing:
+                requirements.append(
+                    "resolve every observed replica feature, set "
+                    "fidelity_met=true, and list exactly the stable ids of "
+                    "user-approved omissions")
             markers = []
             if verification_missing:
                 markers.append("[verification required]")
             if review_missing:
                 markers.append("[design review required]")
+            if fidelity_missing:
+                markers.append("[replica fidelity required]")
             self.messages.append({
                 "role": "user",
                 "content": (
@@ -267,7 +290,7 @@ class Agent:
 
     def send(self, user_message, on_intent, on_result, on_reasoning=None,
              on_context=None, user_images=None, cancel_event=None,
-             on_question=None, on_timeout=None) -> str:
+             on_question=None, on_timeout=None, on_tool=None) -> str:
         from . import cad_workflow, turn_protocol
         from .llm_client import LLMTimeoutError
 
@@ -343,6 +366,23 @@ class Agent:
             reasoning = getattr(proposal, "reasoning", "")
             if reasoning and on_reasoning is not None:
                 on_reasoning(reasoning)
+            if on_tool is not None:
+                if proposal.kind == "script":
+                    on_tool(
+                        "run_freecad_script",
+                        proposal.intent or "Execute FreeCAD Python",
+                        proposal.script)
+                elif proposal.kind == "inspect":
+                    on_tool(
+                        "inspect_document", proposal.query, proposal.query)
+                elif proposal.kind == "api_lookup":
+                    target = ".".join(
+                        value for value in
+                        (proposal.api_module, proposal.api_symbol) if value)
+                    on_tool(
+                        "lookup_freecad_api",
+                        target or proposal.api_query,
+                        proposal.api_query)
             if proposal.kind == "inspect" and self.settings.read_only_inspection:
                 self._handle_inspect(proposal, turn)
                 continue
@@ -368,6 +408,8 @@ class Agent:
                         })
                         continue
                     turn.assumption_questions += 1
+                if turn.fidelity_clarification:
+                    turn.fidelity_questions += 1
                 signal = self._handle_question(
                     proposal, turn, on_question, check_cancelled)
                 if signal is LOOP:
@@ -385,6 +427,26 @@ class Agent:
                 if signal is LOOP:
                     continue
                 return signal
+
+            if proposal.strategy != "part_design":
+                turn.part_design_retries += 1
+                if turn.part_design_retries > max(
+                        1, self.settings.self_correction_attempts):
+                    summary = (
+                        "I couldn't produce a native Part Design proposal.")
+                    self.messages.append(
+                        {"role": "assistant", "content": summary})
+                    return summary
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        "[Part Design required]\nUse strategy=part_design. "
+                        "Create editable geometry in a PartDesign::Body from "
+                        "attached, constrained sketches and native Part Design "
+                        "features. Part primitives, Part::Feature, Shape "
+                        "assignment, and boolean shortcuts are not allowed."),
+                })
+                continue
 
             if self.settings.structured_cad_planning:
                 issues = cad_workflow.proposal_issues(proposal)
@@ -514,6 +576,48 @@ class Agent:
                 turn.ledger["assumptions"] = merged
                 turn.assumption_retries = 0
 
+            if self.settings.fidelity_target == "replica":
+                features, issues = cad_workflow.fidelity_feature_issues(
+                    turn.ledger.get("observed_features"),
+                    proposal.observed_features)
+                if not issues:
+                    omissions = [
+                        row for row in features
+                        if row["status"] == "user_approved_omission"]
+                    blocked = [
+                        row for row in features if row["status"] == "blocked"]
+                    if omissions and turn.fidelity_questions == 0:
+                        turn.fidelity_clarification = True
+                        issues.append(
+                            "ask the user before omitting an observed feature")
+                    if blocked:
+                        issues.append(
+                            "change construction strategy to implement blocked "
+                            "features; difficulty is not permission to omit them")
+                if issues:
+                    turn.fidelity_retries += 1
+                    if turn.fidelity_retries > max(
+                            1, self.settings.self_correction_attempts):
+                        summary = (
+                            "I couldn't preserve the required replica features: "
+                            + "; ".join(issues) + ".")
+                        self.messages.append(
+                            {"role": "assistant", "content": summary})
+                        return summary
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[replica fidelity required]\n"
+                            + "\n".join("- " + issue for issue in issues)
+                            + "\nThe script was not executed. Do not simplify "
+                            "because a feature is difficult; use another CAD "
+                            "strategy or ask_user for explicit omission approval."),
+                    })
+                    continue
+                turn.ledger["observed_features"] = features
+                turn.fidelity_clarification = False
+                turn.fidelity_retries = 0
+
             # record the assistant's tool intent and design stage in history
             workflow_line = ""
             if proposal.strategy or proposal.stage:
@@ -559,6 +663,32 @@ class Agent:
             after = self.access.state()
             new_snap = self.access.snapshot()
             current_snapshot = new_snap
+            if result.ok and getattr(result, "validation_ok", True):
+                part_design_issues = cad_workflow.part_design_issues(
+                    before, after)
+                if part_design_issues:
+                    self.executor.undo(self.app)
+                    current_snapshot = self.access.snapshot()
+                    turn.part_design_retries += 1
+                    if turn.part_design_retries > max(
+                            1, self.settings.self_correction_attempts):
+                        summary = (
+                            "I rolled back repeated non-Part-Design geometry: "
+                            + "; ".join(part_design_issues) + ".")
+                        self.messages.append(
+                            {"role": "assistant", "content": summary})
+                        return summary
+                    self.messages.append({
+                        "role": "user",
+                        "content": (
+                            "[Part Design violation — step rolled back]\n"
+                            + "\n".join(
+                                "- " + issue for issue in part_design_issues)
+                            + "\nRebuild the step with a Body, attached sketch, "
+                            "and native Part Design features."),
+                    })
+                    continue
+                turn.part_design_retries = 0
             on_result(result, new_snap, proposal.intent, proposal.script)
             # If cancellation arrived while Python was already executing, the
             # script cannot be interrupted safely. Report its actual result,

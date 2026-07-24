@@ -13,6 +13,7 @@ from . import (
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
 from .document_binding import PinnedDocumentApp, run_with_document
+from .image_processing import reference_triptych
 from .markdown import to_html as markdown_to_html
 from .settings import load_settings, model_display_name, PARAM_PATH
 from .transcript_format import (
@@ -154,6 +155,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
     reasoningReady = QtCore.Signal(object, str)
     # Completed script step: document key, intent, Python, ExecResult.
     stepReady = QtCore.Signal(object, str, str, object)
+    # Tool call proposed by the model, before execution/dispatch.
+    toolReady = QtCore.Signal(object, str, str, str)
     # Newly-added request context about to be sent to the model.
     contextReady = QtCore.Signal(object, object)
     # Structured clarification question: document key, proposal, answer box,
@@ -166,12 +169,21 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.setObjectName("LLMCopilotDock")
         body = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(body)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         # Persistent entry widgets: appending or updating one message never
         # rebuilds the rest of the transcript.
         self.log = QtGui.QScrollArea()
+        self.log.setObjectName("CopilotTranscript")
         self.log.setWidgetResizable(True)
         self.log.setFrameShape(QtGui.QFrame.NoFrame)
         self.log.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.log.setStyleSheet(
+            "QScrollArea#CopilotTranscript {"
+            " background: palette(base);"
+            " border: 1px solid palette(mid);"
+            " margin: 8px;"
+            "}")
         self.input = QtGui.QLineEdit()
         self.send_btn = QtGui.QPushButton("Send")
         self.cancel_btn = QtGui.QPushButton("Cancel")
@@ -193,15 +205,27 @@ class CopilotDockWidget(QtGui.QDockWidget):
         context_row.addWidget(self.context_label, 1)
         context_row.addWidget(self.clear_btn)
         layout.addWidget(self.log)
-        layout.addLayout(context_row)
-        layout.addWidget(self.attachment_bar)
-        layout.addWidget(self.input)
+
+        footer = QtGui.QWidget()
+        footer.setObjectName("CopilotComposer")
+        footer.setStyleSheet(
+            "QWidget#CopilotComposer {"
+            " background: palette(alternate-base);"
+            " border-top: 1px solid palette(mid);"
+            "}")
+        footer_layout = QtGui.QVBoxLayout(footer)
+        footer_layout.setContentsMargins(10, 8, 10, 10)
+        footer_layout.setSpacing(6)
+        footer_layout.addLayout(context_row)
+        footer_layout.addWidget(self.attachment_bar)
+        footer_layout.addWidget(self.input)
         action_row = QtGui.QHBoxLayout()
         action_row.addWidget(self.send_btn)
         action_row.addWidget(self.cancel_btn)
-        layout.addLayout(action_row)
-        layout.addWidget(self.attach_btn)
-        layout.addWidget(self.undo_btn)
+        footer_layout.addLayout(action_row)
+        footer_layout.addWidget(self.attach_btn)
+        footer_layout.addWidget(self.undo_btn)
+        layout.addWidget(footer)
         self.setWidget(body)
         self.send_btn.clicked.connect(self._on_send)
         self.cancel_btn.clicked.connect(self._on_cancel)
@@ -217,6 +241,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         self.busyChanged.connect(self._set_busy, QtCore.Qt.QueuedConnection)
         self.reasoningReady.connect(self._add_reasoning, QtCore.Qt.QueuedConnection)
         self.stepReady.connect(self._add_step, QtCore.Qt.QueuedConnection)
+        self.toolReady.connect(self._add_tool, QtCore.Qt.QueuedConnection)
         self.contextReady.connect(self._add_context, QtCore.Qt.QueuedConnection)
         self.questionAsked.connect(
             self._ask_question, QtCore.Qt.QueuedConnection)
@@ -398,8 +423,11 @@ class CopilotDockWidget(QtGui.QDockWidget):
 
     def _new_transcript_page(self):
         page = QtGui.QWidget()
+        page.setObjectName("CopilotTranscriptPage")
+        page.setStyleSheet(
+            "QWidget#CopilotTranscriptPage { background: palette(base); }")
         layout = QtGui.QVBoxLayout(page)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(6)
         layout.addStretch(1)
         return page, layout
@@ -524,6 +552,14 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     '<div style="color:gray;">'
                     + _wrappable_escape(entry["text"]).replace("\n", "<br>")
                     + "</div>"))
+        if kind == "tool":
+            title = "Tool · " + entry["tool"]
+            if entry.get("summary"):
+                title += " — " + entry["summary"]
+            return self._disclosure(
+                title,
+                lambda: self._rich_label(
+                    _wrapped_pre(entry.get("details", ""))))
         if kind == "step":
             result = entry["result"]
             def step_content():
@@ -808,6 +844,18 @@ class CopilotDockWidget(QtGui.QDockWidget):
         state["entries"].append(entry)
         self._add_entry_widget(state, entry)
 
+    def _add_tool(self, key, tool, summary, details):
+        """Show a model tool call immediately, before it runs or returns."""
+        state = self._document_states.get(key)
+        if not state:
+            return
+        entry = {
+            "kind": "tool", "tool": tool,
+            "summary": summary, "details": details,
+        }
+        state["entries"].append(entry)
+        self._add_entry_widget(state, entry)
+
     def _add_context(self, key, messages):
         """Add a minimized record of context newly sent with an LLM call."""
         state = self._document_states.get(key)
@@ -975,10 +1023,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     self, "Could not read image",
                     f"FreeCAD could not decode {os.path.basename(path)}.")
                 continue
-            if max(image.width(), image.height()) > 1600:
-                image = image.scaled(
-                    1600, 1600, QtCore.Qt.KeepAspectRatio,
-                    QtCore.Qt.SmoothTransformation)
+            image = reference_triptych(image)
             encoded = QtCore.QByteArray()
             buffer = QtCore.QBuffer(encoded)
             buffer.open(QtCore.QIODevice.WriteOnly)
@@ -987,7 +1032,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
             if not ok:
                 continue
             attachment = {
-                "name": os.path.basename(path),
+                "name": os.path.basename(path)
+                + " — original | contrast enhanced | edge enhanced",
                 "data": base64.b64encode(bytes(encoded)).decode("ascii"),
             }
             self._pending_images.append(attachment)
@@ -1095,6 +1141,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         def on_context(messages):
             self.contextReady.emit(key, messages)
 
+        def on_tool(tool, summary, details):
+            self.toolReady.emit(key, tool, summary, details)
+
         def on_question(proposal):
             answer = {}
             done = threading.Event()
@@ -1120,7 +1169,8 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 out = agent.send(
                     msg, on_intent, on_result, on_reasoning, on_context,
                     user_images=user_images, cancel_event=cancel_event,
-                    on_question=on_question, on_timeout=on_timeout)
+                    on_question=on_question, on_timeout=on_timeout,
+                    on_tool=on_tool)
                 self.resultReady.emit(
                     key, f"<b>{html.escape(model_label)}:</b>"
                     + markdown_to_html(out))

@@ -10,6 +10,8 @@ from freecad.llm_copilot import api_reference
 from freecad.llm_copilot.types import ExecResult
 from freecad.llm_copilot.document_binding import (
     PinnedDocumentApp, run_with_document)
+from freecad.llm_copilot.image_processing import (
+    contrast_enhanced, edge_enhanced)
 
 class InspectorTests(unittest.TestCase):
     def tearDown(self):
@@ -20,6 +22,20 @@ class InspectorTests(unittest.TestCase):
         snap = di.snapshot(App)
         self.assertTrue(snap.startswith("NO_ACTIVE_DOCUMENT"))
         self.assertIn("create or open", snap)
+
+    def test_reference_contrast_and_edge_enhancements(self):
+        from PySide import QtGui
+        image = QtGui.QImage(40, 30, QtGui.QImage.Format_ARGB32)
+        image.fill(QtGui.QColor(180, 180, 180))
+        for y in range(8, 22):
+            for x in range(12, 28):
+                image.setPixel(x, y, QtGui.QColor(40, 40, 40).rgba())
+        contrast = contrast_enhanced(image)
+        edges = edge_enhanced(image)
+        self.assertEqual(contrast.size(), image.size())
+        self.assertEqual(edges.size(), image.size())
+        self.assertNotEqual(
+            image.pixel(12, 8), edges.pixel(12, 8))
 
     def test_lists_objects_with_bbox(self):
         doc = App.newDocument("T")

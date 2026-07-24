@@ -1,10 +1,11 @@
 """Pure helpers for guiding and reviewing a staged, parametric CAD workflow."""
 
 STAGES = ("analyze", "sketch", "additive", "subtractive", "finish", "verify")
-STRATEGIES = (
-    "part_design", "part", "surface", "modify_existing", "inspection")
+STRATEGIES = ("part_design",)
 LEVELS = ("high", "medium", "low")
 STATUSES = ("unverified", "user_confirmed", "measured")
+FIDELITY_STATUSES = (
+    "planned", "implemented", "user_approved_omission", "blocked")
 
 
 def proposal_issues(proposal):
@@ -101,6 +102,51 @@ def merge_assumptions(previous, proposed):
     return tuple(dict(row) for row in proposed), issues
 
 
+def fidelity_feature_issues(previous, proposed):
+    """Validate and merge the replica's observed-feature checklist."""
+    if proposed is None or not proposed:
+        return (), ["provide at least one observed feature for replica fidelity"]
+    issues = []
+    seen = set()
+    for index, row in enumerate(proposed, 1):
+        prefix = f"observed feature {index}"
+        if not isinstance(row, dict):
+            issues.append(prefix + " must be an object")
+            continue
+        row_id = str(row.get("id", "")).strip()
+        if not row_id:
+            issues.append(prefix + " needs a stable id")
+        elif row_id in seen:
+            issues.append(prefix + " has a duplicate id")
+        seen.add(row_id)
+        if not str(row.get("description", "")).strip():
+            issues.append(prefix + " needs a description")
+        status = row.get("status")
+        if status not in FIDELITY_STATUSES:
+            issues.append(prefix + " has invalid status")
+        if "evidence" not in row:
+            issues.append(prefix + " needs evidence (empty while planned)")
+        elif status in ("implemented", "user_approved_omission") and not str(
+                row.get("evidence", "")).strip():
+            issues.append(prefix + " needs evidence for its status")
+    old = {row["id"]: row for row in (previous or ())}
+    new = {row.get("id"): row for row in proposed if isinstance(row, dict)}
+    for row_id, before in old.items():
+        after = new.get(row_id)
+        if after is None:
+            issues.append(f"observed feature {row_id} was removed")
+        elif after.get("description") != before.get("description"):
+            issues.append(f"observed feature {row_id} was renamed")
+        elif (before.get("status") == "implemented"
+              and after.get("status") != "implemented"):
+            issues.append(f"implemented feature {row_id} regressed")
+        elif (before.get("status") == "user_approved_omission"
+              and after.get("status") not in (
+                  "user_approved_omission", "implemented")):
+            issues.append(f"approved feature decision {row_id} regressed")
+    return tuple(dict(row) for row in proposed if isinstance(row, dict)), issues
+
+
 def review_step(before, after, proposal, settings):
     """Inspect a before/after document state for workflow-specific warnings."""
     from .document_inspector import DocumentDelta
@@ -150,6 +196,43 @@ def review_step(before, after, proposal, settings):
     return warnings
 
 
+def part_design_issues(before, after):
+    """Return hard violations of the native Part Design construction policy."""
+    from .document_inspector import DocumentDelta
+    delta = DocumentDelta(before, after)
+    if not delta.changed_names:
+        return []
+    objects = after.get("objects", {})
+    bodies = {
+        name for name, item in objects.items()
+        if item.get("type") == "PartDesign::Body"}
+    sketches = {
+        name for name, item in objects.items()
+        if item.get("type") == "Sketcher::SketchObject"
+        and item.get("body") in bodies}
+    issues = []
+    if not bodies:
+        issues.append("create geometry inside a native PartDesign::Body")
+    if not sketches:
+        issues.append(
+            "create and attach at least one sketch inside the Part Design Body")
+    for name in delta.changed_names:
+        item = objects[name]
+        type_id = item.get("type", "")
+        if type_id.startswith("Part::"):
+            issues.append(
+                f"{name} uses forbidden Part workbench type {type_id}")
+        if type_id in ("PartDesign::Feature", "PartDesign::FeaturePython"):
+            issues.append(
+                f"{name} is an opaque {type_id}; use a native Part Design feature")
+        if ((type_id.startswith("PartDesign::")
+             and type_id != "PartDesign::Body")
+                or type_id == "Sketcher::SketchObject"):
+            if item.get("body") not in bodies:
+                issues.append(f"{name} is not contained in a Part Design Body")
+    return issues
+
+
 def ledger_text(ledger):
     """Render compact persistent working memory for the next model call."""
     lines = [
@@ -183,4 +266,11 @@ def ledger_text(ledger):
             "confidence={confidence}; consequence={consequence}; "
             "status={status}; evidence={evidence}".format(**row)
             for row in assumptions)
+    features = ledger.get("observed_features", ())
+    if features:
+        lines.append("Observed replica features:")
+        lines.extend(
+            "- {id}: {description}; status={status}; evidence={evidence}".format(
+                **row)
+            for row in features)
     return "\n".join(lines)
