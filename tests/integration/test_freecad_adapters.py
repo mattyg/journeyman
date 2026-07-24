@@ -9,7 +9,9 @@ class InspectorTests(unittest.TestCase):
             App.closeDocument(d)
 
     def test_no_active_document(self):
-        self.assertEqual(di.snapshot(App), "NO_ACTIVE_DOCUMENT")
+        snap = di.snapshot(App)
+        self.assertTrue(snap.startswith("NO_ACTIVE_DOCUMENT"))
+        self.assertIn("newDocument", snap)
 
     def test_lists_objects_with_bbox(self):
         doc = App.newDocument("T")
