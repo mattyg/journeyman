@@ -1,0 +1,18 @@
+{
+  "id": "round-mounting-flange-image-minimal",
+  "kind": "create",
+  "prompt": "Model the part shown in the attached image. Make it parametric.",
+  "images": [
+    "refs/round-mounting-flange.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "image-minimal",
+    "fidelity": "replica",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "Only the image was given \u2014 no dimensions. Grade proportions and feature match, plus whether scale assumptions were surfaced; never exact sizes."
+  }
+}

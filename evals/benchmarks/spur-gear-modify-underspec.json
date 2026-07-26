@@ -1,0 +1,14 @@
+{
+  "id": "spur-gear-modify-underspec",
+  "kind": "modify",
+  "prompt": "This gear feels a little flimsy to me for the load it'll see \u2014 can you beef it up a bit so it's stiffer and won't deflect?",
+  "start_document": "refs/spur-gear.FCStd",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "1db55e40f2",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

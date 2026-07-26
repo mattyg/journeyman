@@ -1,0 +1,19 @@
+{
+  "id": "standard-external-hex-coupling-nut-partial-spec",
+  "kind": "create",
+  "prompt": "Can you model me a hex coupling nut? It's a long hex body with a plain hole straight through the middle. Across the flats it should be 17mm, and the through hole is 10mm diameter.",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "0e9bcbd4f4",
+    "withheld": [
+      "overall_length = 30mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

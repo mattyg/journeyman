@@ -1,0 +1,14 @@
+{
+  "id": "standard-external-hex-coupling-nut-modify-underspec",
+  "kind": "modify",
+  "prompt": "This feels a bit flimsy for what I'm doing \u2014 can you beef it up a bit so it holds up better under load?",
+  "start_document": "refs/standard-external-hex-coupling-nut.FCStd",
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

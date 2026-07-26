@@ -1,0 +1,14 @@
+{
+  "id": "five-tiered-front-step-modify-underspec",
+  "kind": "modify",
+  "prompt": "This feels a bit flimsy for something people will be stomping on every day. Can you beef it up so it holds up better?",
+  "start_document": "refs/five-tiered-front-step.FCStd",
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "0f27beedee",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "taper-pin-vague",
+  "kind": "create",
+  "prompt": "I need a little taper pin, something around 4mm long, to locate and hold two parts together in an assembly. Nothing fancy, just the standard tapered pin shape.",
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "163672a65f",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

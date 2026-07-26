@@ -1,0 +1,23 @@
+{
+  "id": "spur-gear-partial-spec",
+  "kind": "create",
+  "prompt": "Can you model me a spur gear? It's a standard 20 degree pressure angle involute gear with a 1.5 mm module. It needs a hub on one side, 55 mm across and 10 mm long, and a plain round bore through the middle for a 12 mm shaft. Nothing fancy, just a solid gear body with the hub and bore.",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "1db55e40f2",
+    "withheld": [
+      "number_of_teeth = 80",
+      "pitch_diameter = 120mm",
+      "outer_diameter = 123mm",
+      "overall_width = 25mm",
+      "face_width = 15mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

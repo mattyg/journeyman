@@ -1,0 +1,15 @@
+{
+  "id": "water-cup-functional",
+  "kind": "create",
+  "prompt": "I need a part I can drink water from \u2014 something I can hold comfortably in one hand, holds a decent glass of water without being top-heavy, and is thin-walled enough to be light but still stiff enough that it won't crumple when I grip it. Open at the top, sits flat on a table without tipping.",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "1b9f95801c",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

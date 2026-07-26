@@ -1,0 +1,14 @@
+{
+  "id": "water-cup-vague",
+  "kind": "create",
+  "prompt": "I need a basic drinking cup modeled, something like a regular water glass, maybe around 120mm tall. Nothing fancy, just a hollow cup with even walls.",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "1b9f95801c",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

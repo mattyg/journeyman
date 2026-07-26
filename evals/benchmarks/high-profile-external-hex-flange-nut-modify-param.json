@@ -1,0 +1,20 @@
+{
+  "id": "high-profile-external-hex-flange-nut-modify-param",
+  "kind": "modify",
+  "prompt": "Can you widen the flange on this nut to 42.5mm? The bracket slot is bigger than I thought and the current one doesn't cover it.",
+  "start_document": "refs/high-profile-external-hex-flange-nut.FCStd",
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "067a9a8726",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "flange_diameter",
+      "old": 34.0,
+      "new": 42.5,
+      "unit": "mm"
+    }
+  }
+}

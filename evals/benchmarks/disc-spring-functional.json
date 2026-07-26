@@ -1,0 +1,15 @@
+{
+  "id": "disc-spring-functional",
+  "kind": "create",
+  "prompt": "I've got a tiny bearing in a compact gear assembly that keeps rattling because of axial play. I need a thin washer-like part that sits in the bore against the bearing face and pushes back with a steady load when it's squeezed flat by the end cap. It has to fit in almost no axial space, seat on a 4mm-ish shaft, and take repeated compression without permanently collapsing. Can you design something that does that?",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "14da78600e",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

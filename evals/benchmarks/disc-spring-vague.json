@@ -1,0 +1,14 @@
+{
+  "id": "disc-spring-vague",
+  "kind": "create",
+  "prompt": "Can you make me a small conical disc spring, like a Belleville washer, roughly 8mm across? It's to preload a little bearing in a gearbox.",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "14da78600e",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "id": "five-tiered-front-step-modify-param",
+  "kind": "modify",
+  "prompt": "Can you bump the height of each step up to 212.5mm? The porch ended up higher than I planned and I need to make up the difference.",
+  "start_document": "refs/five-tiered-front-step.FCStd",
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "0f27beedee",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "step_riser",
+      "old": 170.0,
+      "new": 212.5,
+      "unit": "mm"
+    }
+  }
+}

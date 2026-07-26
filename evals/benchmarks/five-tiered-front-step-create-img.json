@@ -1,0 +1,17 @@
+{
+  "id": "five-tiered-front-step-create-img",
+  "kind": "create",
+  "prompt": "A five-tiered front step modeled as a single prismatic staircase solid. Substructures: (1) stair_profile_2d defined by number_of_steps, step_riser, step_depth, total_rise, total_run; (2) extrusion defined by step_width, extrusion_direction. Create a 2D side profile of 5 risers and 5 treads, then extrude the profile across the full step_width.\n\nKey parameters:\n- **stair_profile_2d**\n  - number_of_steps = 5\n  - step_riser = 170.0 mm\n  - step_depth = 300.0 mm\n  - total_rise = number_of_steps * step_riser = 850.0 mm\n  - total_run = number_of_steps * step_depth = 1500.0 mm\n  - profile_origin = (0.0 mm, 0.0 mm)\n  - tread_direction = +X\n  - rise_direction = +Z\n- **extrusion**\n  - step_width = 1200.0 mm\n  - extrusion_direction = +Y\n  - extrusion_start_plane = Y = 0.0 mm\n  - extrusion_end_plane = Y = step_width = 1200.0 mm",
+  "images": [
+    "refs/five-tiered-front-step.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd"
+  },
+  "judge": {
+    "variant": "create-img",
+    "fidelity": "replica",
+    "dataset_id": "0f27beedee",
+    "notes": "Full spec plus reference render of the ground truth; grade silhouette and feature match."
+  }
+}

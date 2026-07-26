@@ -1,0 +1,15 @@
+{
+  "id": "standard-external-hex-coupling-nut-functional",
+  "kind": "create",
+  "prompt": "I've got two lengths of rod that need to meet end to end in a bracket assembly, and I want a single piece that slips over both ends and can be turned with a standard spanner to snug things up. It needs to be grippable by a wrench from the outside, and the rods have to pass into it from both ends along the same axis. Can you design that part for me?",
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

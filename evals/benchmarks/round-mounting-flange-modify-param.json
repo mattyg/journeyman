@@ -1,0 +1,20 @@
+{
+  "id": "round-mounting-flange-modify-param",
+  "kind": "modify",
+  "prompt": "Can you grow the outside of this flange to 86.82mm? I need a bit more material out past the bolts so the edge doesn't break out.",
+  "start_document": "refs/round-mounting-flange.FCStd",
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "outer_diameter",
+      "old": 69.454,
+      "new": 86.82,
+      "unit": "mm"
+    }
+  }
+}

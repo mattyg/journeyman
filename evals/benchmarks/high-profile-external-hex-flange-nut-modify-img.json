@@ -1,0 +1,23 @@
+{
+  "id": "high-profile-external-hex-flange-nut-modify-img",
+  "kind": "modify",
+  "prompt": "Attached is a screenshot of the nut as it sits right now. See that round skirt at the bottom, the wide disc the wrench flats sit on? I need that disc bigger \u2014 take it out to 42.5mm across. Everything else stays as is.",
+  "images": [
+    "refs/high-profile-external-hex-flange-nut.png"
+  ],
+  "start_document": "refs/high-profile-external-hex-flange-nut.FCStd",
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "067a9a8726",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "flange_diameter",
+      "old": 34.0,
+      "new": 42.5,
+      "unit": "mm"
+    }
+  }
+}

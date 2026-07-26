@@ -1,0 +1,14 @@
+{
+  "id": "spur-gear-vague",
+  "kind": "create",
+  "prompt": "I need a spur gear for a small geared drive \u2014 fine pitch, fairly large, roughly 120mm or so across, with a hub and a bore in the middle so I can key it to a shaft. Can you put something together?",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "1db55e40f2",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

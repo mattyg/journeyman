@@ -1,0 +1,10 @@
+{
+  "id": "hanger-modify",
+  "kind": "modify",
+  "prompt": "The open document contains a climbing bolt hanger. Change the bolt hole to fit an M12 bolt (13 mm clearance diameter) instead of its current size, keeping the hanger outline, thickness, and the clip-in hole unchanged. Make the change parametrically by editing the driving sketch constraint, not by rebuilding features.",
+  "start_document": "../../examples/climbing-bolt-hanger.FCStd",
+  "expect": {},
+  "judge": {
+    "notes": "Grade whether the agent inspected first, found the driving constraint for the bolt hole, edited it in place, and verified the 13 mm result. Rebuilding the hanger from scratch or altering the outline is a failure of design-intent preservation."
+  }
+}

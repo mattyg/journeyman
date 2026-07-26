@@ -1,0 +1,20 @@
+{
+  "id": "five-tiered-front-step-partial-spec",
+  "kind": "create",
+  "prompt": "I need a front entry step modeled as a solid staircase \u2014 draw the side profile and extrude it. Each riser should be 170mm tall, and the whole thing needs to be 1200mm wide to match the doorway landing.",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "0f27beedee",
+    "withheld": [
+      "number_of_steps = 5",
+      "step_depth = 300mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

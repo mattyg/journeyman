@@ -1,0 +1,19 @@
+{
+  "id": "water-cup-partial-spec",
+  "kind": "create",
+  "prompt": "Can you model me a simple water cup? It should be 80mm across and the wall thickness needs to be 2mm, hollowed out inside so the thickness is even all around.",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "1b9f95801c",
+    "withheld": [
+      "cup_height = 120mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "water-cup-image-minimal",
+  "kind": "create",
+  "prompt": "Model the part shown in the attached image. Make it parametric.",
+  "images": [
+    "refs/water-cup.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "image-minimal",
+    "fidelity": "replica",
+    "dataset_id": "1b9f95801c",
+    "notes": "Only the image was given \u2014 no dimensions. Grade proportions and feature match, plus whether scale assumptions were surfaced; never exact sizes."
+  }
+}

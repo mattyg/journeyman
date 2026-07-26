@@ -1,0 +1,17 @@
+{
+  "id": "taper-pin-partial-spec",
+  "kind": "create",
+  "prompt": "Can you model a taper pin for me? It needs to be 4mm long.",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "163672a65f",
+    "withheld": [],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

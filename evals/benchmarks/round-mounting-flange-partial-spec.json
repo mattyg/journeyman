@@ -1,0 +1,21 @@
+{
+  "id": "round-mounting-flange-partial-spec",
+  "kind": "create",
+  "prompt": "I need a round mounting flange modeled up. It should have 4 bolt holes, each 6.747mm diameter, spaced evenly on a 56.356mm bolt circle. There's a plain through hole in the middle too. Can you put that together for me?",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "0fe9d9e3ce",
+    "withheld": [
+      "flange_thickness = 13.097mm",
+      "outer_diameter = 69.454mm",
+      "inner_diameter = 34.925mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

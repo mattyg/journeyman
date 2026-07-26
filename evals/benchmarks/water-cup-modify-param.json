@@ -1,0 +1,20 @@
+{
+  "id": "water-cup-modify-param",
+  "kind": "modify",
+  "prompt": "Could you bump the wall thickness up to 2.5mm? The current walls feel too flimsy when it's full.",
+  "start_document": "refs/water-cup.FCStd",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "1b9f95801c",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "cup_thickness",
+      "old": 2.0,
+      "new": 2.5,
+      "unit": "mm"
+    }
+  }
+}

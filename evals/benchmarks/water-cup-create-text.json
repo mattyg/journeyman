@@ -1,0 +1,14 @@
+{
+  "id": "water-cup-create-text",
+  "kind": "create",
+  "prompt": "A water cup consists of a cup body and its interior is hollowed out to achieve a consistent thickness.\nA water cup is normally defined by cup_diameter, cup_height, cup_thickness, etc.\n\nKey parameters:\n- cup_diameter=80.0mm, cup_height=120.0mm, cup_thickness=2.0mm",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd"
+  },
+  "judge": {
+    "variant": "create-text",
+    "fidelity": "functional-analogue",
+    "dataset_id": "1b9f95801c",
+    "notes": "Full text spec, no image; grade spec adherence only."
+  }
+}
