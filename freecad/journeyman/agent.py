@@ -1,7 +1,7 @@
 # freecad/journeyman/agent.py
 import re
 
-from .workflow_engine import TurnState as _Turn, WorkflowEngine
+from .workflow import TurnState as _Turn, WorkflowEngine
 from .transcript import Transcript, model_history as _model_history
 
 

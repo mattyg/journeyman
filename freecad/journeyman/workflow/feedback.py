@@ -11,7 +11,8 @@ so the wording the model sees is defined in one greppable place and can be
 pinned with golden tests. The functions are pure: no FreeCAD, no Qt, no client.
 """
 
-from . import cad_workflow, document_inspector
+from . import policy as cad_workflow
+from .. import document_inspector
 
 
 def request(user_message):

@@ -6,7 +6,8 @@ know how individual planning, assumption, fidelity, and script-shape rules
 mutate the turn ledger.
 """
 
-from . import cad_workflow, turn_protocol
+from . import feedback as turn_protocol
+from . import policy as cad_workflow
 
 
 class TurnState:
