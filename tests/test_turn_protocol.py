@@ -29,6 +29,28 @@ def test_inspection_result_stage_tags():
         "[verify-stage inspection result]\nR")
 
 
+def test_superseded_inspection_names_the_query():
+    text = turn_protocol.superseded_inspection("Sketch.Support")
+    assert text.startswith("[superseded inspection]\n")
+    assert "You inspected: Sketch.Support" in text
+    assert "Inspect again if you need it." in text
+    verify = turn_protocol.superseded_inspection(
+        "Pad", verify_stage=True)
+    assert verify.startswith("[superseded verify-stage inspection]\n")
+    assert "You inspected: Pad" in verify
+
+
+def test_is_document_changing_result():
+    assert turn_protocol.is_document_changing_result(
+        "[executed OK]\n[document diff]\nCreated: Box\n")
+    assert not turn_protocol.is_document_changing_result(
+        "[executed OK]\n[document unchanged]\n")
+    assert not turn_protocol.is_document_changing_result(
+        "[script failed]\nboom")
+    assert not turn_protocol.is_document_changing_result(
+        "[inspection result]\nstuff")
+
+
 def test_api_reference_blocks():
     assert turn_protocol.api_reference("DOC") == (
         "[installed-version API reference]\nDOC")

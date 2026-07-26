@@ -38,39 +38,33 @@ SYSTEM_PROMPT = (
     "- lookup_freecad_api(query, module, symbol): inspect the installed FreeCAD "
     "version and bundled API field guide. Use it instead of guessing classes, "
     "methods, properties, enums, or attachment workflows.\n"
-    "- finish(summary, verified, evidence): call this ONLY when the whole task is complete. "
-    "the user a question. `summary` is the message shown to the user.\n"
+    "- finish(summary, verified, evidence): call this ONLY when the whole task "
+    "is complete — never to describe work you still intend to do, and never to "
+    "ask the user a question. `summary` is the message shown to the user.\n"
     "\n"
     "If a previous script errored, FIX IT and call run_freecad_script again — do "
     "NOT call finish to describe the fix. Keep calling run_freecad_script until the "
     "geometry is actually done, then call finish once.\n"
     "\n"
-    "To inspect the model, call run_freecad_script with a script that uses print(); its "
-    "stdout is returned to you as [script output] on the next turn, so you can "
-    "check values (vertices, isClosed, validity) and then act on what you see. "
-    "Python stderr and execution-scoped FreeCAD console warnings/errors are "
-    "also returned; investigate console errors even if execution otherwise "
-    "reports success. "
-    "Prefer inspect_document for read-only checks. Diagnostic scripts that need "
-    "custom FreeCAD calculations go through the execution tool too.\n"
+    "Prefer inspect_document for read-only checks. For custom calculations, "
+    "call run_freecad_script with print(); its stdout returns as [script "
+    "output] next turn, so you can check values (vertices, isClosed, validity) "
+    "and act on them. stderr and FreeCAD console warnings/errors return too — "
+    "investigate console errors even when execution reports success.\n"
     "\n"
     "FreeCAD API rules (follow exactly):\n"
-    "- The host requires an active document before starting a conversation. "
-    "Never create a document merely because App.ActiveDocument is missing.\n"
-    "- If a document is already active, use App.ActiveDocument. Do NOT create "
-    "another document unless the user explicitly asks for a separate document.\n"
+    "- Always use App.ActiveDocument. The host guarantees one exists; never "
+    "create a document, even if App.ActiveDocument looks missing, unless the "
+    "user explicitly asks for a separate one.\n"
     "- `doc` has NO `XY_Plane`, `Body`, or origin attributes. Those do not exist "
     "on the document.\n"
-    "- For PartDesign, create a Body first: body = "
-    "doc.addObject('PartDesign::Body','Body'); doc.recompute(). The origin planes "
-    "are body.Origin.OriginFeatures (or reference them by their real Name shown "
-    "in the snapshot). A sketch attaches via "
-    "sketch.AttachmentSupport = [(plane, '')]; sketch.MapMode = 'FlatFace'.\n"
-    "- Always build editable geometry with Part Design: create a "
-    "PartDesign::Body, attach sketches to origin planes or datums, constrain "
-    "them, and use native Part Design features such as Pad, Pocket, Hole, "
-    "Revolution, and AdditivePipe. Do not use Part primitives, Part::Feature, "
-    "Shape assignment, or Part boolean shortcuts for model construction.\n"
+    "- Build all geometry with native Part Design. Create a Body first: body = "
+    "doc.addObject('PartDesign::Body','Body'); doc.recompute(). Origin planes "
+    "are body.Origin.OriginFeatures (or use the real Name from the snapshot). "
+    "Sketches attach via sketch.AttachmentSupport = [(plane, '')]; "
+    "sketch.MapMode = 'FlatFace'. Constrain them, then use native features "
+    "(Pad, Pocket, Hole, Revolution, AdditivePipe). Do not use Part "
+    "primitives, Part::Feature, Shape assignment, or Part booleans.\n"
     "- Refer to existing objects by the exact Name shown in the snapshot; do not "
     "guess attribute names. Prefer editing existing objects over rebuilding.\n"
     "- Never delete or modify Origin, origin planes, or origin axes to resolve "
@@ -95,8 +89,7 @@ _WORKFLOW_PROMPT = (
     "- Work like a careful human CAD designer: analyze references, make a "
     "feature-level plan, build stable sketches/base forms, add material, remove "
     "material, apply finishing features last, then measure and review.\n"
-    "- Use the part_design strategy and preserve an existing native feature "
-    "tree when modifying it.\n"
+    "- Preserve an existing native feature tree when modifying it.\n"
     "- Give meaningful names to bodies, sketches, parameters, and features. "
     "Prefer datum/origin references over fragile generated-face references.\n"
 )
@@ -895,12 +888,22 @@ def _complete_anthropic(wire_model: str, messages: list,
                 {"role": message["role"], "content": blocks})
         else:
             anthropic_messages.append(message)
+    # The system prompt and tool schemas are identical on every call of a
+    # conversation and together run to a couple of thousand tokens. Two cache
+    # breakpoints make that prefix near-free from the second turn onward, which
+    # is where the per-session cost was going.
+    tools = _anthropic_tools(settings)
+    if tools:
+        tools = tools[:-1] + [
+            dict(tools[-1], cache_control={"type": "ephemeral"})]
     payload = {
         "model": wire_model,
         "max_tokens": DEFAULT_MAX_TOKENS,
-        "system": _system_prompt(settings),  # system is top-level, not a message
+        # system is top-level, not a message; a block list so it can be cached.
+        "system": [{"type": "text", "text": _system_prompt(settings),
+                    "cache_control": {"type": "ephemeral"}}],
         "messages": anthropic_messages,
-        "tools": _anthropic_tools(settings),
+        "tools": tools,
     }
     effort = getattr(settings, "reasoning_effort", "off")
     thinking_on = bool(effort and effort != "off")

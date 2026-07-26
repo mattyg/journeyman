@@ -21,6 +21,17 @@ def test_compressed_history_roundtrip_restores_execution_results_and_images():
     assert "widget" not in restored_entries[0]
 
 
+def test_inspection_marker_keys_survive_the_roundtrip():
+    # _model_history reduces superseded inspections using these keys, so a
+    # reloaded conversation must compact exactly like a live one.
+    messages = [{
+        "role": "user", "content": "[inspection result]\nFULL",
+        "ephemeral": "inspection", "inspection_query": "Pad",
+    }]
+    restored_messages, _entries = decode(encode(messages, []))
+    assert restored_messages == messages
+
+
 def test_question_history_persists_answer_but_not_live_callback():
     entry = {
         "kind": "question", "question": "Choose",

@@ -35,6 +35,34 @@ def inspection_result(inspected, *, verify_stage=False):
     return header + inspected
 
 
+def superseded_inspection(query, *, verify_stage=False):
+    """A stale inspection's result, dropped in favour of a newer view.
+
+    The full result stays in the durable transcript; the model sees only that
+    the inspection happened and what it covered. Keeping that fact — rather
+    than dropping the exchange — stops the model re-running an inspection it
+    already did, while keeping requests from growing without bound.
+    """
+    header = (
+        "[superseded verify-stage inspection]\n"
+        if verify_stage else "[superseded inspection]\n")
+    return (
+        header
+        + f"You inspected: {query}\n"
+        + "The full result is omitted here because the document has since "
+        "changed or been inspected again. Inspect again if you need it.")
+
+
+def is_document_changing_result(content):
+    """True when this feedback block reports a step that altered the document.
+
+    Reads the same two markers :func:`execution_body` writes, so the rule for
+    "the document moved" lives next to the code that states it.
+    """
+    return (content.startswith("[executed OK]")
+            and "[document unchanged]" not in content)
+
+
 def api_reference(reference):
     """An installed-version FreeCAD API reference lookup result."""
     return "[installed-version API reference]\n" + reference

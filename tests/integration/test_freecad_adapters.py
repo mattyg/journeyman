@@ -56,6 +56,30 @@ class InspectorTests(unittest.TestCase):
         self.assertTrue(after["objects"]["Box"]["shape"]["valid"])
         self.assertIn("Created: Box", di.structured_diff(before, after))
 
+    def test_rich_snapshot_is_flat_text_not_json(self):
+        doc = App.newDocument("T")
+        box = doc.addObject("Part::Box", "Box")
+        box.Length = 10
+        doc.recompute()
+        snap = di.snapshot(App, rich=True)
+        self.assertTrue(snap.startswith("[rich state]\n"))
+        self.assertIn("Box (Part::Box)", snap)
+        self.assertIn("solids=1", snap)
+        self.assertNotIn('"type":', snap)
+        # The denylist strips chrome the model never acts on.
+        self.assertNotIn("Visibility=", snap)
+
+    def test_inspect_query_matches_label_and_type_not_just_name(self):
+        doc = App.newDocument("T")
+        box = doc.addObject("Part::Box", "Box")
+        box.Label = "Baseplate"
+        doc.recompute()
+        doc.addObject("Part::Cylinder", "Cylinder")
+        doc.recompute()
+        # Neither query names "Box" literally; both must still find it.
+        self.assertIn("Box (Part::Box)", di.inspect(App, "the baseplate"))
+        self.assertIn("Box (Part::Box)", di.inspect(App, "part::box object"))
+
     def test_cylinder_diameters_are_measured_from_the_solid(self):
         """A run measured its own model, saw no 12 mm cylinder where the bolt
         hole should be, and talked itself out of the discrepancy. The number

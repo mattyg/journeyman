@@ -1,4 +1,3 @@
-import json
 from .history_store import is_internal_object
 
 
@@ -70,6 +69,112 @@ def _cylinder_diameters(shape, limit=12):
     return sorted(diameters)
 
 
+# Properties every object carries that the model never acts on. A denylist
+# rather than an allowlist: an unfamiliar feature type still reports its real
+# properties, so nothing the model depends on can vanish silently.
+_NOISE_PROPERTIES = frozenset((
+    "Shape", "ExpressionEngine", "Visibility", "Label2", "Placement",
+    "AttachmentOffset", "_Body", "_LinkTouched", "Proxy", "ViewObject",
+))
+
+
+def _is_noise(name, value):
+    """True for a property not worth its tokens in the model-facing state."""
+    if name in _NOISE_PROPERTIES:
+        return True
+    # An empty string carries no information; 0 and False often do (a zero
+    # Length is a real defect), so only strings are dropped on emptiness.
+    return isinstance(value, str) and not value.strip()
+
+
+def _format_number(value):
+    """Trim trailing zeros so 15.0 reads as 15 and 12483.2 keeps its digit."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        return str(value).lower() if isinstance(value, bool) else str(value)
+    return f"{value:g}"
+
+
+def format_state(state):
+    """Render document state as flat text for the model.
+
+    JSON spends several tokens per field on braces, quotes and colons, and this
+    payload is re-read on most turns — the same content as line-oriented text
+    costs roughly a third as much. Nothing parses this back; the structured
+    dict from :func:`document_state` remains the interface for diffing and
+    validation.
+    """
+    doc = state.get("document")
+    if doc is None:
+        return "No active document."
+    lines = ["Document: " + str(doc)]
+    objects = state.get("objects") or {}
+    if not objects:
+        lines.append("(empty — no objects yet)")
+    for name in sorted(objects):
+        item = objects[name]
+        head = f"{name} ({item.get('type', 'unknown type')})"
+        label = item.get("label")
+        if label and label != name:
+            head += f" label={label!r}"
+        if item.get("body"):
+            head += f" body={item['body']}"
+        lines.append(head)
+        lines.extend("  " + line for line in _object_lines(item))
+    selection = state.get("selection") or ()
+    if selection:
+        lines.append("Selected: " + ", ".join(selection))
+    return "\n".join(lines)
+
+
+def _object_lines(item):
+    """The indented detail lines for one object in :func:`format_state`."""
+    lines = []
+    shape = item.get("shape") or {}
+    if shape.get("inspection_error"):
+        lines.append("shape could not be inspected: "
+                     + str(shape["inspection_error"]))
+    elif shape:
+        parts = ["shape", "valid" if shape.get("valid") else "INVALID"]
+        if shape.get("null"):
+            parts.append("null")
+        for key in ("solids", "shells", "faces", "edges", "vertices"):
+            if shape.get(key):
+                parts.append(f"{key}={shape[key]}")
+        for key in ("volume", "area"):
+            if shape.get(key):
+                parts.append(f"{key}={_format_number(shape[key])}")
+        bbox = item.get("bbox")
+        if bbox:
+            parts.append("bbox=" + "x".join(_format_number(v) for v in bbox))
+        lines.append(" ".join(parts))
+        if shape.get("cylinder_diameters"):
+            lines.append("cylinder diameters: " + ", ".join(
+                _format_number(d) for d in shape["cylinder_diameters"]))
+    # Sketch health drives real guards in cad_workflow; always worth its tokens.
+    if "fully_constrained" in item:
+        lines.append(
+            "fully constrained" if item["fully_constrained"]
+            else "NOT fully constrained")
+    if item.get("solver"):
+        lines.append("solver: " + str(item["solver"]))
+    if item.get("state"):
+        lines.append("state: " + ", ".join(item["state"]))
+    if item.get("origin_features"):
+        lines.append("origin features: " + ", ".join(item["origin_features"]))
+    props = item.get("properties") or {}
+    if props:
+        lines.append(" ".join(
+            f"{key}={_format_number(props[key])}" for key in sorted(props)))
+    links = []
+    if item.get("depends_on"):
+        links.append("<- " + ", ".join(item["depends_on"]))
+    if item.get("used_by"):
+        links.append("-> " + ", ".join(item["used_by"]))
+    if links:
+        lines.append("  ".join(links))
+    return lines
+
+
 def document_state(app, rich=True):
     """Return stable structured state suitable for diffs and model inspection."""
     doc = getattr(app, "ActiveDocument", None)
@@ -113,12 +218,14 @@ def document_state(app, rich=True):
         if rich:
             props = {}
             for name in getattr(obj, "PropertiesList", []):
-                if name in ("Shape", "ExpressionEngine"):
+                if name in _NOISE_PROPERTIES:
                     continue
                 try:
                     value = getattr(obj, name)
                     if isinstance(value, (str, int, float, bool)) or hasattr(value, "Value"):
-                        props[name] = _safe_value(value)
+                        safe = _safe_value(value)
+                        if not _is_noise(name, safe):
+                            props[name] = safe
                 except Exception:
                     pass
             if props:
@@ -279,9 +386,16 @@ def inspect(app, query=""):
     state = document_state(app, rich=True)
     if query:
         objects = state["objects"]
+        lowered = query.lower()
+        # Match the query against name, label and type. Matching the name
+        # alone meant a query that said "the pad" rather than "Pad001" missed
+        # everything and fell back to dumping the whole document.
         selected = {
-            name for name in objects
-            if name.lower() in query.lower()}
+            name for name, item in objects.items()
+            if name.lower() in lowered
+            or str(item.get("label", "")).lower() in lowered
+            or any(part and part.lower() in lowered
+                   for part in str(item.get("type", "")).split("::"))}
         related = set(selected)
         for name in selected:
             item = objects[name]
@@ -292,8 +406,7 @@ def inspect(app, query=""):
             state["objects"] = {
                 name: objects[name] for name in sorted(related)
                 if name in objects}
-    return (f"Query: {query}\n" if query else "") + json.dumps(
-        state, indent=2, sort_keys=True)
+    return (f"Query: {query}\n" if query else "") + format_state(state)
 
 
 def snapshot(app, rich=False) -> str:
@@ -303,10 +416,7 @@ def snapshot(app, rich=False) -> str:
                 "There is no active document. The user must create or open one "
                 "before using Journeyman.")
     if rich:
-        return (
-            "[rich state]\n"
-            + json.dumps(document_state(app, rich=True),
-                         separators=(",", ":"), sort_keys=True))
+        return "[rich state]\n" + format_state(document_state(app, rich=True))
     lines = [f"Document: {doc.Name}"]
     if not doc.Objects:
         lines.append("(empty — no objects yet)")

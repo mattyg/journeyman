@@ -14,11 +14,70 @@ LOOP = ("loop",)
 EXECUTE = ("execute",)
 
 
+_INSPECTION_HEADERS = (
+    "[inspection result]\n", "[verify-stage inspection result]\n")
+
+
+def _is_ephemeral_inspection(message):
+    """True for an inspection result, whether tagged this session or not.
+
+    The header fallback covers histories written before the tag existed and
+    reloaded from ``history_store``, so a saved conversation compacts exactly
+    like a live one.
+    """
+    if message.get("ephemeral") == "inspection":
+        return True
+    content = message.get("content")
+    return isinstance(content, str) and content.startswith(_INSPECTION_HEADERS)
+
+
+def _live_inspection_index(messages):
+    """Index of the one inspection still worth its tokens, or ``None``.
+
+    An inspection describes the document at an instant, and the current
+    document is re-injected fresh on every call. So an older inspection is not
+    merely redundant — once a script has changed the document it is *wrong* in
+    exactly the detail the model asked for, and reasoning against it is how a
+    step gets planned around properties that no longer hold. Keep the most
+    recent one, and only while nothing has moved since.
+    """
+    from . import turn_protocol
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if _is_ephemeral_inspection(message):
+            return index
+        content = message.get("content")
+        if (isinstance(content, str)
+                and turn_protocol.is_document_changing_result(content)):
+            return None
+    return None
+
+
 def _model_history(messages):
-    """Compact superseded state from histories written by older versions."""
+    """The model-facing projection of the durable transcript.
+
+    ``Agent.messages`` is the record: it is persisted into the document, shown
+    in the chat panel, and exported. What the model sees is derived from it
+    here — superseded inspections collapse to a note, and state written by
+    older versions of the plugin is compacted out. Neither the transcript nor
+    the export is affected.
+    """
+    from . import turn_protocol
+    live = _live_inspection_index(messages)
     compact = []
     for index, message in enumerate(messages):
         item = dict(message)
+        # Load-bearing, not tidiness: both providers forward message dicts
+        # verbatim, so an unstripped marker key would reach the wire payload.
+        item.pop("ephemeral", None)
+        query = item.pop("inspection_query", "")
+        if _is_ephemeral_inspection(message) and index != live:
+            item["content"] = turn_protocol.superseded_inspection(
+                query or "(query not recorded)",
+                verify_stage=str(message.get("content", "")).startswith(
+                    "[verify-stage"))
+            compact.append(item)
+            continue
         content = item.get("content")
         if isinstance(content, str):
             if content.startswith("[document snapshot]\n"):
@@ -387,7 +446,15 @@ class Agent:
             "content": f"(read-only inspection) {proposal.query}"})
         feedback = turn_protocol.inspection_result(
             inspected, verify_stage=verification_inspection)
-        self.messages.append({"role": "user", "content": feedback})
+        # Tagged, not truncated: the full result stays in the durable
+        # transcript for the UI and the export, and _model_history decides at
+        # send time whether the model still needs it. See _live_inspection_index.
+        self.messages.append({
+            "role": "user",
+            "content": feedback,
+            "ephemeral": "inspection",
+            "inspection_query": proposal.query,
+        })
         if on_tool_result is not None:
             on_tool_result("inspect_document", proposal.query, feedback)
         return LOOP

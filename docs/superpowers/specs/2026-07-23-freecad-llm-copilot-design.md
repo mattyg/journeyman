@@ -1,4 +1,4 @@
-# FreeCAD LLM Copilot — Design
+# FreeCAD Journeyman — Design
 
 **Date:** 2026-07-23
 **Status:** Implemented
@@ -18,7 +18,7 @@
 ## Summary
 
 A FreeCAD plugin that lets a provider-agnostic, externally-hosted LLM act as a
-CAD copilot. The user describes what they want in plain language; the LLM
+CAD journeyman. The user describes what they want in plain language; the LLM
 inspects the active document, proposes and executes FreeCAD Python, and the user
 reviews the result by its **visual impact on the model** — not by reading code.
 

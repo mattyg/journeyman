@@ -9,10 +9,15 @@ def estimate_tokens(messages, system_prompt="", tools=None):
     Four characters per token is a conventional display-only approximation.
     JSON serialization accounts for roles and tool schema overhead as well as
     message content. Providers may tokenize the same request differently.
+
+    Measures the *model-facing projection* of the transcript, not the durable
+    transcript itself. The two diverge once an inspection is superseded, and
+    reporting the stored size would overstate every later request.
     """
+    from .agent import _model_history
     payload = {
         "system": system_prompt,
-        "messages": messages,
+        "messages": _model_history(messages),
         "tools": tools or [],
     }
     characters = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))

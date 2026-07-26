@@ -414,6 +414,33 @@ def test_read_only_inspection_does_not_execute():
                for m in client.calls[-1])
 
 
+def test_stale_inspection_leaves_the_transcript_but_not_the_request():
+    client = FakeClient([
+        LLMProposal("", "", "", False, kind="inspect", query="first look"),
+        LLMProposal("make box", "pass", "", True),
+        LLMProposal("", "", "", False, kind="inspect", query="second look"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    executor = FakeExecutor([ExecResult(True, "", "", True, "valid", True)])
+    agent = _agent(client, executor, _settings(auto_approve_loop=True))
+    out = agent.send("build", lambda i: True, lambda r, s, i, p: None)
+    assert out == "Done"
+    # The durable transcript keeps both inspections in full, for the chat
+    # panel and the transcript export.
+    kept = [m for m in agent.messages
+            if str(m.get("content", "")).startswith("[inspection result]")]
+    assert len(kept) == 2
+    # The wire carries only the live one; the superseded one is a short note.
+    final = client.calls[-1]
+    full = [m for m in final
+            if str(m.get("content", "")).startswith("[inspection result]")]
+    stale = [m for m in final
+             if str(m.get("content", "")).startswith("[superseded inspection]")]
+    assert len(full) == 1
+    assert len(stale) == 1
+    assert "You inspected: first look" in stale[0]["content"]
+
+
 def test_multiple_choice_answer_resumes_same_agent_turn():
     options = (
         {"id": "flush", "label": "Flush", "description": "Level with face."},
@@ -633,6 +660,82 @@ def test_legacy_history_drops_superseded_snapshots_ledgers_and_scripts():
     assert "OLD FULL STATE" not in text
     assert "OLD PLAN" not in text
     assert "SECRET SOURCE" not in text
+
+
+def _inspection(query="Pad", body="FULL RESULT", verify=False):
+    header = ("[verify-stage inspection result]\n" if verify
+              else "[inspection result]\n")
+    return {"role": "user", "content": header + body,
+            "ephemeral": "inspection", "inspection_query": query}
+
+
+def test_sole_inspection_is_sent_in_full():
+    compact = _model_history([_inspection()])
+    assert compact[0]["content"] == "[inspection result]\nFULL RESULT"
+
+
+def test_only_the_newest_inspection_survives():
+    compact = _model_history([
+        _inspection("Sketch", "OLD RESULT"),
+        _inspection("Pad", "NEW RESULT"),
+    ])
+    assert "OLD RESULT" not in compact[0]["content"]
+    assert compact[0]["content"].startswith("[superseded inspection]\n")
+    assert "You inspected: Sketch" in compact[0]["content"]
+    assert compact[1]["content"] == "[inspection result]\nNEW RESULT"
+
+
+def test_inspection_is_dropped_once_a_script_changed_the_document():
+    compact = _model_history([
+        _inspection("Pad", "STALE RESULT"),
+        {"role": "user", "content":
+            "[executed OK]\n[document diff]\nCreated: Box\n"},
+    ])
+    assert "STALE RESULT" not in compact[0]["content"]
+    assert compact[0]["content"].startswith("[superseded inspection]\n")
+
+
+def test_inspection_survives_a_script_that_changed_nothing():
+    compact = _model_history([
+        _inspection("Pad", "LIVE RESULT"),
+        {"role": "user", "content": "[executed OK]\n[document unchanged]\n"},
+    ])
+    assert compact[0]["content"] == "[inspection result]\nLIVE RESULT"
+
+
+def test_inspection_survives_a_failed_script():
+    compact = _model_history([
+        _inspection("Pad", "LIVE RESULT"),
+        {"role": "user", "content": "[script failed]\nboom"},
+    ])
+    assert compact[0]["content"] == "[inspection result]\nLIVE RESULT"
+
+
+def test_untagged_legacy_inspection_is_still_recognised():
+    # A history saved before the tag existed, reloaded from history_store.
+    compact = _model_history([
+        {"role": "user", "content": "[inspection result]\nOLD RESULT"},
+        _inspection("Pad", "NEW RESULT"),
+    ])
+    assert "OLD RESULT" not in compact[0]["content"]
+    assert "(query not recorded)" in compact[0]["content"]
+
+
+def test_verify_stage_inspection_keeps_its_tag_when_superseded():
+    compact = _model_history([
+        _inspection("Pad", "OLD", verify=True),
+        _inspection("Sketch", "NEW"),
+    ])
+    assert compact[0]["content"].startswith(
+        "[superseded verify-stage inspection]\n")
+
+
+def test_marker_keys_never_reach_the_wire():
+    compact = _model_history([
+        _inspection("Sketch", "OLD"), _inspection("Pad", "NEW")])
+    for item in compact:
+        assert "ephemeral" not in item
+        assert "inspection_query" not in item
 
 
 def test_missing_plan_is_advisory_and_ledger_is_sent():

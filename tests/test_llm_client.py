@@ -135,6 +135,20 @@ def test_assumption_schema_is_gated_and_rows_are_parsed():
     assert proposal.assumptions[0]["id"] == "w"
 
 
+def test_finish_tool_description_is_a_complete_sentence():
+    # The description was once truncated mid-sentence by an edit, leaving
+    # "call this ONLY when the whole task is complete. the user a question."
+    prompt = lc.system_prompt(_settings())
+    assert "complete. the user a question" not in prompt
+    assert "never to ask the user a question" in prompt
+
+
+def test_disabling_read_only_inspection_leaves_no_dangling_reference():
+    settings = _settings()
+    settings.read_only_inspection = False
+    assert "inspect_document" not in lc.system_prompt(settings)
+
+
 def test_assumption_fidelity_and_inferred_prompt_fragments_are_gated():
     settings = _settings()
     base = lc.system_prompt(settings)
@@ -369,9 +383,16 @@ def test_anthropic_parses_tool_use(monkeypatch):
     assert captured["headers"]["x-api-key"] == "sk-x"
     assert captured["headers"]["anthropic-version"] == lc.ANTHROPIC_VERSION
     assert captured["payload"]["model"] == "claude-opus-4-8"
-    assert captured["payload"]["system"] == lc.SYSTEM_PROMPT
+    # System is a cacheable block list; the last tool carries the second
+    # breakpoint, so the fixed preamble is cached across a conversation.
+    system = captured["payload"]["system"]
+    assert system[0]["text"] == lc.SYSTEM_PROMPT
+    assert system[0]["cache_control"] == {"type": "ephemeral"}
     assert captured["payload"]["max_tokens"] == lc.DEFAULT_MAX_TOKENS
-    assert captured["payload"]["tools"] == lc.ANTHROPIC_TOOL_SCHEMA
+    tools = captured["payload"]["tools"]
+    assert tools[-1]["cache_control"] == {"type": "ephemeral"}
+    assert [{k: v for k, v in t.items() if k != "cache_control"}
+            for t in tools] == lc.ANTHROPIC_TOOL_SCHEMA
     # system is hoisted out of messages, not injected as a message
     assert all(m["role"] != "system" for m in captured["payload"]["messages"])
 

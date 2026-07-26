@@ -1,19 +1,19 @@
-# FreeCAD LLM Copilot Implementation Plan
+# FreeCAD Journeyman Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a provider-agnostic LLM copilot for FreeCAD that inspects the active document, proposes and executes FreeCAD Python, and lets the user review changes by visual outcome (keep/undo), delivered as an Addon-Manager-installable workbench with a dockable chat panel.
+**Goal:** Build a provider-agnostic LLM journeyman for FreeCAD that inspects the active document, proposes and executes FreeCAD Python, and lets the user review changes by visual outcome (keep/undo), delivered as an Addon-Manager-installable workbench with a dockable chat panel.
 
-**Architecture:** A modern namespaced FreeCAD addon (`freecad/llm_copilot/`). A pure-Python core (`agent`, `llm_client`) runs the inspect→propose→execute→read-back loop and is unit-tested without FreeCAD. Two thin adapters (`document_inspector`, `script_executor`) touch the FreeCAD API and are tested headless via `freecadcmd`. One Qt dock widget (`chat_panel`) is the only UI. LiteLLM provides provider abstraction.
+**Architecture:** A modern namespaced FreeCAD addon (`freecad/journeyman/`). A pure-Python core (`agent`, `llm_client`) runs the inspect→propose→execute→read-back loop and is unit-tested without FreeCAD. Two thin adapters (`document_inspector`, `script_executor`) touch the FreeCAD API and are tested headless via `freecadcmd`. One Qt dock widget (`chat_panel`) is the only UI. LiteLLM provides provider abstraction.
 
 **Tech Stack:** Python 3, FreeCAD 1.0+ Python API, PySide (Qt), LiteLLM, pytest (core), FreeCAD `__unit_test__`/`unittest` (integration).
 
 ## Global Constraints
 
-- Namespaced addon layout: all runtime code under `freecad/llm_copilot/`.
+- Namespaced addon layout: all runtime code under `freecad/journeyman/`.
 - Only `chat_panel.py` may import PySide/Qt. Only `document_inspector.py` and `script_executor.py` may import `FreeCAD`/`FreeCADGui`. `agent.py` and `llm_client.py` must import neither.
 - Every executed script wraps in exactly one FreeCAD transaction (`openTransaction`/`commitTransaction`; `abortTransaction` on error) so one undo reverts it.
-- Settings live in FreeCAD's parameter system under `User parameter:BaseApp/Preferences/LLMCopilot`.
+- Settings live in FreeCAD's parameter system under `User parameter:BaseApp/Preferences/Journeyman`.
 - Settings + defaults (verbatim): Model (none); API key (none); API base URL (none); `ConfirmBeforeRunning` = true; `AutoApproveLoop` = false; `MaxAutoApprovedSteps` = 5; `SelfCorrectionAttempts` = 3.
 - Review is outcome-based: users see plain-language intent + visual result, never code as the primary surface.
 - LLM tool exposed to the model: `run_freecad_script(script: str, intent: str)`.
@@ -25,9 +25,9 @@
 ## File Structure
 
 ```
-freecad-llm-plugin/
+freecad-journeyman/
 ├─ freecad/
-│  └─ llm_copilot/
+│  └─ journeyman/
 │     ├─ __init__.py            # namespace init (empty/minimal)
 │     ├─ init_gui.py            # workbench + command registration, panel toggle
 │     ├─ settings.py            # read/write params, dataclass Settings
@@ -101,8 +101,8 @@ class Agent:
 ### Task 1: Addon scaffold + settings
 
 **Files:**
-- Create: `freecad/llm_copilot/__init__.py`
-- Create: `freecad/llm_copilot/settings.py`
+- Create: `freecad/journeyman/__init__.py`
+- Create: `freecad/journeyman/settings.py`
 - Create: `package.xml`
 - Create: `pyproject.toml`
 - Create: `requirements.txt`
@@ -113,13 +113,13 @@ class Agent:
 - Consumes: nothing.
 - Produces: `Settings` dataclass, `load_settings(param_get)`, `save_settings(param_get, settings)` — the exact signatures in the shared contract above.
 
-`param_get` is a FreeCAD `ParamGet` group handle. Its API used here: `.GetString(name, default)`, `.SetString(name, value)`, `.GetBool(name, default)`, `.SetBool(name, value)`, `.GetInt(name, default)`, `.SetInt(name, value)`. Tests inject a fake implementing these; production passes `FreeCAD.ParamGet("User parameter:BaseApp/Preferences/LLMCopilot")`.
+`param_get` is a FreeCAD `ParamGet` group handle. Its API used here: `.GetString(name, default)`, `.SetString(name, value)`, `.GetBool(name, default)`, `.SetBool(name, value)`, `.GetInt(name, default)`, `.SetInt(name, value)`. Tests inject a fake implementing these; production passes `FreeCAD.ParamGet("User parameter:BaseApp/Preferences/Journeyman")`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
 # tests/test_settings.py
-from freecad.llm_copilot.settings import Settings, load_settings, save_settings
+from freecad.journeyman.settings import Settings, load_settings, save_settings
 
 class FakeParam:
     def __init__(self): self.s, self.b, self.i = {}, {}, {}
@@ -156,17 +156,17 @@ def test_save_then_load_roundtrips():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_settings.py -v`
-Expected: FAIL — `ModuleNotFoundError: freecad.llm_copilot.settings`
+Expected: FAIL — `ModuleNotFoundError: freecad.journeyman.settings`
 
 - [ ] **Step 3: Create the namespace init and implementation**
 
 ```python
-# freecad/llm_copilot/__init__.py
-# Namespace package for the LLM Copilot addon.
+# freecad/journeyman/__init__.py
+# Namespace package for the Journeyman addon.
 ```
 
 ```python
-# freecad/llm_copilot/settings.py
+# freecad/journeyman/settings.py
 from dataclasses import dataclass
 
 @dataclass
@@ -206,18 +206,18 @@ def save_settings(param_get, settings: "Settings") -> None:
 <!-- package.xml -->
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
-  <name>LLM Copilot</name>
-  <description>Provider-agnostic LLM copilot for creating and editing CAD models.</description>
+  <name>Journeyman</name>
+  <description>Provider-agnostic LLM journeyman for creating and editing CAD models.</description>
   <version>0.1.0</version>
   <date>2026-07-23</date>
   <maintainer email="matt@buildyourweb.app">matt</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
-  <url type="repository" branch="main">https://github.com/matt/freecad-llm-plugin</url>
-  <url type="readme">https://github.com/matt/freecad-llm-plugin/blob/main/README.md</url>
+  <url type="repository" branch="main">https://github.com/matt/freecad-journeyman</url>
+  <url type="readme">https://github.com/matt/freecad-journeyman/blob/main/README.md</url>
   <content>
     <workbench>
-      <classname>LLMCopilotWorkbench</classname>
-      <subdirectory>./freecad/llm_copilot/</subdirectory>
+      <classname>JourneymanWorkbench</classname>
+      <subdirectory>./freecad/journeyman/</subdirectory>
     </workbench>
   </content>
   <!-- litellm is not on the Addon Manager python allow-list; it is installed
@@ -249,7 +249,7 @@ Expected: PASS (2 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add freecad/llm_copilot/__init__.py freecad/llm_copilot/settings.py package.xml pyproject.toml requirements.txt LICENSE tests/test_settings.py
+git add freecad/journeyman/__init__.py freecad/journeyman/settings.py package.xml pyproject.toml requirements.txt LICENSE tests/test_settings.py
 git commit -m "feat: addon scaffold and settings"
 ```
 
@@ -258,7 +258,7 @@ git commit -m "feat: addon scaffold and settings"
 ### Task 2: LLM client (LiteLLM wrapper)
 
 **Files:**
-- Create: `freecad/llm_copilot/llm_client.py`
+- Create: `freecad/journeyman/llm_client.py`
 - Test: `tests/test_llm_client.py`
 
 **Interfaces:**
@@ -272,8 +272,8 @@ The tool schema is OpenAI/LiteLLM function-calling format for `run_freecad_scrip
 ```python
 # tests/test_llm_client.py
 import types, json
-import freecad.llm_copilot.llm_client as lc
-from freecad.llm_copilot.settings import Settings
+import freecad.journeyman.llm_client as lc
+from freecad.journeyman.settings import Settings
 
 def _settings():
     return Settings("openai/gpt-5.4", "sk-x", "", True, False, 5, 3)
@@ -321,13 +321,13 @@ Expected: FAIL — module/attribute not found.
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# freecad/llm_copilot/llm_client.py
+# freecad/journeyman/llm_client.py
 import json
 from dataclasses import dataclass
 from .settings import Settings
 
 SYSTEM_PROMPT = (
-    "You are a CAD copilot operating inside FreeCAD. You receive a text snapshot "
+    "You are a CAD journeyman operating inside FreeCAD. You receive a text snapshot "
     "of the active document before each turn. To change the model, call the "
     "run_freecad_script tool with (1) `intent`: one plain-language sentence a "
     "non-programmer designer will read, and (2) `script`: FreeCAD Python using the "
@@ -401,7 +401,7 @@ Expected: PASS (2 passed)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add freecad/llm_copilot/llm_client.py tests/test_llm_client.py
+git add freecad/journeyman/llm_client.py tests/test_llm_client.py
 git commit -m "feat: LiteLLM client wrapper with run_freecad_script tool"
 ```
 
@@ -410,14 +410,14 @@ git commit -m "feat: LiteLLM client wrapper with run_freecad_script tool"
 ### Task 3: Agent loop
 
 **Files:**
-- Create: `freecad/llm_copilot/agent.py`
+- Create: `freecad/journeyman/agent.py`
 - Test: `tests/test_agent.py`
 
 **Interfaces:**
 - Consumes: `complete`/`LLMProposal` (Task 2), `Settings` (Task 1), and the Inspector/Executor protocols (`snapshot(app)`, `run(app, script)->ExecResult`, `undo(app)`) defined in the shared contract. `ExecResult` is imported from `script_executor` (Task 5) — but to keep Task 3 testable before Task 5, define `ExecResult` in a tiny shared module.
 - Produces: `Agent` class with `send(user_message, on_intent, on_result) -> str`.
 
-**Design decision:** put `ExecResult` in `script_executor.py` and have `agent.py` import it. Since importing `script_executor` imports FreeCAD, that would break pure-python tests. **Resolution:** define `ExecResult` in its own import-safe module `freecad/llm_copilot/types.py` (no FreeCAD/Qt imports); both `agent.py` and `script_executor.py` import it from there.
+**Design decision:** put `ExecResult` in `script_executor.py` and have `agent.py` import it. Since importing `script_executor` imports FreeCAD, that would break pure-python tests. **Resolution:** define `ExecResult` in its own import-safe module `freecad/journeyman/types.py` (no FreeCAD/Qt imports); both `agent.py` and `script_executor.py` import it from there.
 
 The agent injects `client`, `inspector` (callable `app->str`), `executor` (object with `run(app, script)->ExecResult` and `undo(app)`), `app`, and `settings`. `on_intent(intent)->bool` is the approval gate (return True to proceed). `on_result(exec_result, snapshot)` notifies the UI. Loop rules:
 - Prepend current snapshot to the user message each turn.
@@ -430,10 +430,10 @@ The agent injects `client`, `inspector` (callable `app->str`), `executor` (objec
 
 ```python
 # tests/test_agent.py
-from freecad.llm_copilot.agent import Agent
-from freecad.llm_copilot.types import ExecResult
-from freecad.llm_copilot.llm_client import LLMProposal
-from freecad.llm_copilot.settings import Settings
+from freecad.journeyman.agent import Agent
+from freecad.journeyman.types import ExecResult
+from freecad.journeyman.llm_client import LLMProposal
+from freecad.journeyman.settings import Settings
 
 class FakeClient:
     def __init__(self, proposals): self.proposals, self.calls = proposals, []
@@ -513,12 +513,12 @@ def test_stops_at_max_auto_approved_steps():
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/test_agent.py -v`
-Expected: FAIL — `freecad.llm_copilot.types` / `agent` missing.
+Expected: FAIL — `freecad.journeyman.types` / `agent` missing.
 
 - [ ] **Step 3: Write the shared types module**
 
 ```python
-# freecad/llm_copilot/types.py
+# freecad/journeyman/types.py
 from dataclasses import dataclass
 
 @dataclass
@@ -531,7 +531,7 @@ class ExecResult:
 - [ ] **Step 4: Write the agent**
 
 ```python
-# freecad/llm_copilot/agent.py
+# freecad/journeyman/agent.py
 class Agent:
     def __init__(self, client, inspector, executor, app, settings):
         self.client = client
@@ -607,7 +607,7 @@ Expected: PASS (5 passed)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add freecad/llm_copilot/types.py freecad/llm_copilot/agent.py tests/test_agent.py
+git add freecad/journeyman/types.py freecad/journeyman/agent.py tests/test_agent.py
 git commit -m "feat: agent inspect/act/read-back loop with gate, retries, step cap"
 ```
 
@@ -616,7 +616,7 @@ git commit -m "feat: agent inspect/act/read-back loop with gate, retries, step c
 ### Task 4: Document inspector (FreeCAD adapter)
 
 **Files:**
-- Create: `freecad/llm_copilot/document_inspector.py`
+- Create: `freecad/journeyman/document_inspector.py`
 - Test: `tests/integration/test_freecad_adapters.py` (inspector cases)
 
 **Interfaces:**
@@ -631,7 +631,7 @@ git commit -m "feat: agent inspect/act/read-back loop with gate, retries, step c
 # tests/integration/test_freecad_adapters.py  (run under freecadcmd)
 import unittest
 import FreeCAD as App
-from freecad.llm_copilot import document_inspector as di
+from freecad.journeyman import document_inspector as di
 
 class InspectorTests(unittest.TestCase):
     def tearDown(self):
@@ -660,7 +660,7 @@ Expected: FAIL — `document_inspector` missing.
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# freecad/llm_copilot/document_inspector.py
+# freecad/journeyman/document_inspector.py
 def _selection_names():
     try:
         import FreeCADGui as Gui
@@ -695,7 +695,7 @@ Run the headless suite (Task 7 runner). Expected: inspector cases PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add freecad/llm_copilot/document_inspector.py tests/integration/test_freecad_adapters.py
+git add freecad/journeyman/document_inspector.py tests/integration/test_freecad_adapters.py
 git commit -m "feat: document inspector snapshot"
 ```
 
@@ -704,11 +704,11 @@ git commit -m "feat: document inspector snapshot"
 ### Task 5: Script executor (FreeCAD adapter)
 
 **Files:**
-- Create: `freecad/llm_copilot/script_executor.py`
+- Create: `freecad/journeyman/script_executor.py`
 - Modify: `tests/integration/test_freecad_adapters.py` (add executor cases)
 
 **Interfaces:**
-- Consumes: `ExecResult` from `freecad/llm_copilot/types.py` (Task 3).
+- Consumes: `ExecResult` from `freecad/journeyman/types.py` (Task 3).
 - Produces: `run(app, script) -> ExecResult` and `undo(app) -> None`. `run` opens one transaction, execs the script with `App.ActiveDocument` reachable, recomputes, commits; on any exception it aborts the transaction and returns `ok=False` with the traceback. Stdout is captured.
 
 The script executes with globals providing `App`, `FreeCAD`, and (if available) `Part`. `undo(app)` calls `app.ActiveDocument.undo()`.
@@ -718,7 +718,7 @@ The script executes with globals providing `App`, `FreeCAD`, and (if available) 
 ```python
 # add to tests/integration/test_freecad_adapters.py
 import FreeCAD as App
-from freecad.llm_copilot import script_executor as se
+from freecad.journeyman import script_executor as se
 
 class ExecutorTests(unittest.TestCase):
     def setUp(self): self.doc = App.newDocument("E")
@@ -750,7 +750,7 @@ class ExecutorTests(unittest.TestCase):
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# freecad/llm_copilot/script_executor.py
+# freecad/journeyman/script_executor.py
 import io
 import traceback
 import contextlib
@@ -766,7 +766,7 @@ def run(app, script: str) -> "ExecResult":
         g["Part"] = Part
     except Exception:
         pass
-    doc.openTransaction("LLM Copilot")
+    doc.openTransaction("Journeyman")
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
@@ -789,7 +789,7 @@ def undo(app) -> None:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add freecad/llm_copilot/script_executor.py tests/integration/test_freecad_adapters.py
+git add freecad/journeyman/script_executor.py tests/integration/test_freecad_adapters.py
 git commit -m "feat: transactional script executor with undo and stdout capture"
 ```
 
@@ -798,20 +798,20 @@ git commit -m "feat: transactional script executor with undo and stdout capture"
 ### Task 6: Chat panel + workbench wiring
 
 **Files:**
-- Create: `freecad/llm_copilot/chat_panel.py`
-- Create: `freecad/llm_copilot/init_gui.py`
+- Create: `freecad/journeyman/chat_panel.py`
+- Create: `freecad/journeyman/init_gui.py`
 - Test: manual smoke (documented steps below) — no automated test; this layer is thin and Qt/GUI-bound.
 
 **Interfaces:**
 - Consumes: `Agent` (Task 3), `complete` (Task 2, wrapped into a small client object), `snapshot` (Task 4), `script_executor` module (Task 5), `load_settings`/`save_settings` (Task 1).
-- Produces: `LLMCopilotWorkbench` (registered via `Gui.addWorkbench`) and a `CopilotDockWidget(QDockWidget)` added to the main window.
+- Produces: `JourneymanWorkbench` (registered via `Gui.addWorkbench`) and a `JourneymanDockWidget(QDockWidget)` added to the main window.
 
 The panel builds an `Agent` with: a client adapter exposing `.complete(messages, settings)` that calls `llm_client.complete`; `inspector=document_inspector.snapshot`; an executor object = the `script_executor` module (it already has `run`/`undo`); `app=FreeCAD`; `settings=load_settings(...)`. Sending runs `agent.send` on a worker thread so the UI stays responsive; `on_intent` shows a modal-free inline approve/reject that blocks the worker via a thread-safe event; `on_result` posts the new snapshot/intent to the log and offers an Undo button that calls `script_executor.undo`.
 
 - [ ] **Step 1: Write the chat panel**
 
 ```python
-# freecad/llm_copilot/chat_panel.py
+# freecad/journeyman/chat_panel.py
 import threading
 from PySide import QtGui, QtCore
 import FreeCAD
@@ -821,18 +821,18 @@ from . import document_inspector, script_executor, llm_client
 from .agent import Agent
 from .settings import load_settings
 
-PARAM_PATH = "User parameter:BaseApp/Preferences/LLMCopilot"
+PARAM_PATH = "User parameter:BaseApp/Preferences/Journeyman"
 
 class _Client:
     def complete(self, messages, settings):
         return llm_client.complete(messages, settings)
 
-class CopilotDockWidget(QtGui.QDockWidget):
+class JourneymanDockWidget(QtGui.QDockWidget):
     resultReady = QtCore.Signal(str)
 
     def __init__(self, parent=None):
-        super().__init__("LLM Copilot", parent)
-        self.setObjectName("LLMCopilotDock")
+        super().__init__("Journeyman", parent)
+        self.setObjectName("JourneymanDock")
         body = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(body)
         self.log = QtGui.QTextEdit(); self.log.setReadOnly(True)
@@ -890,7 +890,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                 out = self.agent.send(msg, on_intent, on_result)
             except Exception as e:
                 out = f"Error: {e}"
-            self.resultReady.emit(f"<b>Copilot:</b> {out}")
+            self.resultReady.emit(f"<b>Journeyman:</b> {out}")
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -904,7 +904,7 @@ def toggle_panel():
     global _dock
     mw = Gui.getMainWindow()
     if _dock is None:
-        _dock = CopilotDockWidget(mw)
+        _dock = JourneymanDockWidget(mw)
         mw.addDockWidget(QtCore.Qt.RightDockWidgetArea, _dock)
     else:
         _dock.setVisible(not _dock.isVisible())
@@ -913,49 +913,49 @@ def toggle_panel():
 - [ ] **Step 2: Write the workbench + command**
 
 ```python
-# freecad/llm_copilot/init_gui.py
+# freecad/journeyman/init_gui.py
 import FreeCAD
 import FreeCADGui as Gui
 
 class _TogglePanelCommand:
     def GetResources(self):
-        return {"MenuText": "LLM Copilot",
-                "ToolTip": "Show/hide the LLM Copilot chat panel"}
+        return {"MenuText": "Journeyman",
+                "ToolTip": "Show/hide the Journeyman chat panel"}
     def IsActive(self):
         return True
     def Activated(self):
-        from freecad.llm_copilot.chat_panel import toggle_panel
+        from freecad.journeyman.chat_panel import toggle_panel
         toggle_panel()
 
-class LLMCopilotWorkbench(Gui.Workbench):
-    MenuText = "LLM Copilot"
-    ToolTip = "AI copilot for creating and editing CAD models"
+class JourneymanWorkbench(Gui.Workbench):
+    MenuText = "Journeyman"
+    ToolTip = "AI journeyman for creating and editing CAD models"
 
     def Initialize(self):
-        Gui.addCommand("LLMCopilot_TogglePanel", _TogglePanelCommand())
-        self.appendToolbar("LLM Copilot", ["LLMCopilot_TogglePanel"])
-        self.appendMenu("LLM Copilot", ["LLMCopilot_TogglePanel"])
+        Gui.addCommand("Journeyman_TogglePanel", _TogglePanelCommand())
+        self.appendToolbar("Journeyman", ["Journeyman_TogglePanel"])
+        self.appendMenu("Journeyman", ["Journeyman_TogglePanel"])
 
     def Activated(self):
-        from freecad.llm_copilot.chat_panel import toggle_panel
+        from freecad.journeyman.chat_panel import toggle_panel
         toggle_panel()
 
     def GetClassName(self):
         return "Gui::PythonWorkbench"
 
-Gui.addWorkbench(LLMCopilotWorkbench())
+Gui.addWorkbench(JourneymanWorkbench())
 ```
 
 - [ ] **Step 3: Manual smoke test**
 
-Symlink the repo into FreeCAD's `Mod` dir, launch FreeCAD, switch to the "LLM Copilot" workbench, set a model+key via the parameter editor (Tools → Edit parameters → `BaseApp/Preferences/LLMCopilot`), click the toolbar button, type "make a 10mm cube", confirm the intent dialog, and verify a box appears and "Undo last change" removes it.
+Symlink the repo into FreeCAD's `Mod` dir, launch FreeCAD, switch to the "Journeyman" workbench, set a model+key via the parameter editor (Tools → Edit parameters → `BaseApp/Preferences/Journeyman`), click the toolbar button, type "make a 10mm cube", confirm the intent dialog, and verify a box appears and "Undo last change" removes it.
 
 Document this in README (Task 8).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add freecad/llm_copilot/chat_panel.py freecad/llm_copilot/init_gui.py
+git add freecad/journeyman/chat_panel.py freecad/journeyman/init_gui.py
 git commit -m "feat: chat panel dock widget and workbench registration"
 ```
 
@@ -979,7 +979,7 @@ git commit -m "feat: chat panel dock widget and workbench registration"
 # tests/integration/run_headless.py
 import os, sys, unittest
 
-# Ensure repo root on path so `import freecad.llm_copilot...` works.
+# Ensure repo root on path so `import freecad.journeyman...` works.
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
@@ -1013,8 +1013,8 @@ git commit -m "test: headless FreeCAD integration runner"
 
 **Files:**
 - Create: `README.md`
-- Create: `freecad/llm_copilot/deps.py`
-- Modify: `freecad/llm_copilot/init_gui.py` (call dependency check on load)
+- Create: `freecad/journeyman/deps.py`
+- Modify: `freecad/journeyman/init_gui.py` (call dependency check on load)
 - Test: `tests/test_deps.py` (pytest)
 
 **Interfaces:**
@@ -1028,7 +1028,7 @@ git commit -m "test: headless FreeCAD integration runner"
 ```python
 # tests/test_deps.py
 import builtins
-import freecad.llm_copilot.deps as deps
+import freecad.journeyman.deps as deps
 
 def test_ensure_reports_true_when_importable(monkeypatch):
     monkeypatch.setattr(deps, "_can_import", lambda name: True)
@@ -1044,11 +1044,11 @@ def test_ensure_reports_false_when_missing(monkeypatch):
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# freecad/llm_copilot/deps.py
+# freecad/journeyman/deps.py
 import importlib
 
 GUIDANCE = (
-    "LLM Copilot requires the 'litellm' package. Install it into FreeCAD's "
+    "Journeyman requires the 'litellm' package. Install it into FreeCAD's "
     "Python environment, e.g.:\n"
     "    <freecad-python> -m pip install -r requirements.txt\n"
     "then restart FreeCAD."
@@ -1072,16 +1072,16 @@ def ensure_litellm() -> bool:
     return False
 ```
 
-- [ ] **Step 4: Wire into init_gui.py** — add near the top of `LLMCopilotWorkbench.Initialize`:
+- [ ] **Step 4: Wire into init_gui.py** — add near the top of `JourneymanWorkbench.Initialize`:
 
 ```python
-        from freecad.llm_copilot.deps import ensure_litellm
+        from freecad.journeyman.deps import ensure_litellm
         ensure_litellm()
 ```
 
 - [ ] **Step 5: Write README.md**
 
-Cover: what it is; provider-agnostic via LiteLLM with example model strings; install (Addon Manager + `pip install -r requirements.txt` into FreeCAD's Python); configuring model/key/base URL and the autonomy settings under `BaseApp/Preferences/LLMCopilot` with their defaults; the manual smoke-test flow from Task 6; how to run both test tiers from Task 7; the outcome-based review model (intent + visual keep/undo, code hidden). Include a safety note that the copilot executes generated Python against the active document and that every step is a single undo.
+Cover: what it is; provider-agnostic via LiteLLM with example model strings; install (Addon Manager + `pip install -r requirements.txt` into FreeCAD's Python); configuring model/key/base URL and the autonomy settings under `BaseApp/Preferences/Journeyman` with their defaults; the manual smoke-test flow from Task 6; how to run both test tiers from Task 7; the outcome-based review model (intent + visual keep/undo, code hidden). Include a safety note that Journeyman executes generated Python against the active document and that every step is a single undo.
 
 - [ ] **Step 6: Run tests**
 
@@ -1091,7 +1091,7 @@ Expected: PASS (2 passed). Then run the full pytest set to confirm nothing regre
 - [ ] **Step 7: Commit**
 
 ```bash
-git add README.md freecad/llm_copilot/deps.py freecad/llm_copilot/init_gui.py tests/test_deps.py
+git add README.md freecad/journeyman/deps.py freecad/journeyman/init_gui.py tests/test_deps.py
 git commit -m "feat: dependency check with guidance and project README"
 ```
 
