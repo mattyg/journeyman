@@ -17,12 +17,12 @@ from .document_session import (
     DocumentSession, PinnedDocumentApp, run_with_document,
 )
 from .image_processing import reference_triptych
-from .markdown import to_html as markdown_to_html
-from .settings import load_settings, model_display_name, PARAM_PATH
-from .transcript_format import (
+from .markdown import (
+    to_html as markdown_to_html,
     wrappable_escape as _wrappable_escape,
     wrapped_pre as _wrapped_pre,
 )
+from .settings import load_settings, model_display_name, PARAM_PATH
 
 class _Client:
     def complete(self, messages, settings):

@@ -11,6 +11,31 @@ _INLINE_CODE = re.compile(r"`([^`\n]+)`")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 
 
+def wrappable_escape(text, chunk=48):
+    """Escape text and add zero-width breaks inside unusually long tokens."""
+    parts = []
+    for part in re.split(r"(\s+)", str(text or "")):
+        if not part or part.isspace():
+            parts.append(html.escape(part))
+            continue
+        parts.append("&#8203;".join(
+            html.escape(part[index:index + chunk])
+            for index in range(0, len(part), chunk)))
+    return "".join(parts)
+
+
+def wrapped_pre(text):
+    """Monospace, newline-preserving HTML that remains word-wrappable."""
+    lines = []
+    for line in str(text or "").splitlines():
+        leading = len(line) - len(line.lstrip(" "))
+        lines.append(
+            "&nbsp;" * leading + wrappable_escape(line[leading:]))
+    return ('<div style="font-family:monospace;white-space:normal;'
+            'word-wrap:break-word;">'
+            + "<br>".join(lines) + "</div>")
+
+
 def _break_escaped(text, chunk=48):
     # Treat HTML entities as one visible character so a break never corrupts
     # escaped source such as &lt; or &amp;.
