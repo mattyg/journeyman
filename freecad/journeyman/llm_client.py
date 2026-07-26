@@ -433,13 +433,8 @@ def system_prompt(settings):
 
 
 def _openai_tools(settings):
-    tools = copy.deepcopy(TOOL_SCHEMA)
-    if not settings.freecad_api_lookup:
-        tools = [t for t in tools if t["function"]["name"] != _API_NAME]
-    if not settings.read_only_inspection:
-        tools = [t for t in tools if t["function"]["name"] != _INSPECT_NAME]
-    if not settings.on_demand_render:
-        tools = [t for t in tools if t["function"]["name"] != _RENDER_NAME]
+    tools = [copy.deepcopy(spec.schema)
+             for spec in TOOL_SPECS if spec.enabled(settings)]
     if not settings.mandatory_verification:
         finish = next(t["function"] for t in tools
                       if t["function"]["name"] == _FINISH_NAME)
@@ -552,6 +547,67 @@ class LLMProposal:
     @property
     def is_finish(self) -> bool:
         return self.kind == "finish"
+
+
+class ScriptProposal(LLMProposal):
+    """A document-changing or diagnostic Python tool request."""
+
+
+class FinishProposal(LLMProposal):
+    """A request to finish the current agent turn."""
+
+
+class InspectionProposal(LLMProposal):
+    """A structured document inspection request."""
+
+
+class RenderProposal(LLMProposal):
+    """An offscreen document render request."""
+
+
+class QuestionProposal(LLMProposal):
+    """A structured clarification request."""
+
+
+class ApiLookupProposal(LLMProposal):
+    """An installed-FreeCAD API lookup request."""
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """One source of truth for schema, result type, and feature flag."""
+
+    name: str
+    schema: dict
+    proposal_type: type
+    setting: str = ""
+
+    def enabled(self, settings):
+        return not self.setting or bool(getattr(settings, self.setting))
+
+
+_PROPOSAL_TYPES = {
+    _TOOL_NAME: ScriptProposal,
+    _FINISH_NAME: FinishProposal,
+    _INSPECT_NAME: InspectionProposal,
+    _RENDER_NAME: RenderProposal,
+    _QUESTION_NAME: QuestionProposal,
+    _API_NAME: ApiLookupProposal,
+}
+
+_TOOL_SETTINGS = {
+    _INSPECT_NAME: "read_only_inspection",
+    _RENDER_NAME: "on_demand_render",
+    _API_NAME: "freecad_api_lookup",
+}
+
+TOOL_SPECS = tuple(
+    ToolSpec(tool["function"]["name"], tool,
+             _PROPOSAL_TYPES[tool["function"]["name"]],
+             _TOOL_SETTINGS.get(tool["function"]["name"], ""))
+    for tool in TOOL_SCHEMA)
+
+TOOL_SPEC_BY_NAME = {spec.name: spec for spec in TOOL_SPECS}
 
 
 # Which providers expose a reasoning-effort knob (drives the Preferences UI).
@@ -795,7 +851,7 @@ def _openai_reasoning(message: dict) -> str:
     return ""
 
 
-def _question_proposal(args, reasoning=""):
+def _question_proposal(args, reasoning="", proposal_type=QuestionProposal):
     options = []
     for option in (args.get("options") or [])[:5]:
         if not isinstance(option, dict):
@@ -808,7 +864,7 @@ def _question_proposal(args, reasoning=""):
                 "label": label,
                 "description": str(option.get("description", "")).strip(),
             })
-    return LLMProposal(
+    return proposal_type(
         "", "", "", False, reasoning=reasoning, kind="question",
         question=str(args.get("question", "")).strip(),
         options=tuple(options),
@@ -826,8 +882,12 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
     tool name; the caller decides how to handle that (treat text as a finish).
     """
     args = args or {}
+    spec = TOOL_SPEC_BY_NAME.get(name)
+    if spec is None:
+        return None
+    proposal_type = spec.proposal_type
     if name == _TOOL_NAME:
-        return LLMProposal(
+        return proposal_type(
             intent=args.get("intent", ""), script=args.get("script", ""),
             text=text, is_tool_call=True, reasoning=reasoning, kind="script",
             strategy=args.get("strategy", "part_design"),
@@ -843,7 +903,7 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
                 if isinstance(row, dict))
             if "observed_features" in args else None)
     if name == _FINISH_NAME:
-        return LLMProposal(
+        return proposal_type(
             intent="", script="", text=args.get("summary", "") or text,
             is_tool_call=False, reasoning=reasoning, kind="finish",
             verified=bool(args.get("verified")),
@@ -852,18 +912,18 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
             fidelity_met=bool(args.get("fidelity_met")),
             fidelity_omissions=tuple(args.get("fidelity_omissions") or ()))
     if name == _INSPECT_NAME:
-        return LLMProposal(
+        return proposal_type(
             "", "", "", False, reasoning=reasoning, kind="inspect",
             query=args.get("query", ""))
     if name == _RENDER_NAME:
-        return LLMProposal(
+        return proposal_type(
             "", "", "", False, reasoning=reasoning, kind="render",
             render_objects=tuple(
                 str(item) for item in (args.get("objects") or ()) if item))
     if name == _QUESTION_NAME:
-        return _question_proposal(args, reasoning)
+        return _question_proposal(args, reasoning, proposal_type)
     if name == _API_NAME:
-        return LLMProposal(
+        return proposal_type(
             "", "", "", False, reasoning=reasoning, kind="api_lookup",
             api_query=str(args.get("query", "")),
             api_module=str(args.get("module", "FreeCAD")),
@@ -906,8 +966,8 @@ def _complete_openai(wire_model: str, provider: str, messages: list,
     # No recognized tool call (a model that ignored tool_choice): treat any text
     # as a finish so the turn still resolves rather than looping.
     _debug("openai: no tool call; text=%r" % (content[:120]))
-    return LLMProposal(intent="", script="", text=content,
-                       is_tool_call=False, reasoning=reasoning, kind="finish")
+    return FinishProposal(intent="", script="", text=content,
+                          is_tool_call=False, reasoning=reasoning, kind="finish")
 
 
 def _complete_anthropic(wire_model: str, messages: list,
@@ -987,8 +1047,8 @@ def _complete_anthropic(wire_model: str, messages: list,
             return _proposal_from_tool(
                 name, tool_blocks[name].get("input"), reasoning, text)
     # Thinking-on path may return plain text; treat it as a finish.
-    return LLMProposal(intent="", script="", text=text,
-                       is_tool_call=False, reasoning=reasoning, kind="finish")
+    return FinishProposal(intent="", script="", text=text,
+                          is_tool_call=False, reasoning=reasoning, kind="finish")
 
 
 def complete(messages: list, settings: Settings) -> "LLMProposal":

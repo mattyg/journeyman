@@ -64,6 +64,23 @@ def test_proposal_from_tool_covers_every_kind():
 
     render = lc._proposal_from_tool(lc._RENDER_NAME, {"objects": ["Body"]})
     assert render.kind == "render" and render.render_objects == ("Body",)
+    assert isinstance(script, lc.ScriptProposal)
+    assert isinstance(finish, lc.FinishProposal)
+    assert isinstance(inspect, lc.InspectionProposal)
+    assert isinstance(api, lc.ApiLookupProposal)
+    assert isinstance(question, lc.QuestionProposal)
+    assert isinstance(render, lc.RenderProposal)
+
+
+def test_tool_specs_own_schema_type_and_feature_switch():
+    specs = {spec.name: spec for spec in lc.TOOL_SPECS}
+    assert set(specs) == {
+        lc._TOOL_NAME, lc._FINISH_NAME, lc._INSPECT_NAME,
+        lc._RENDER_NAME, lc._QUESTION_NAME, lc._API_NAME,
+    }
+    assert specs[lc._RENDER_NAME].proposal_type is lc.RenderProposal
+    settings = dataclasses.replace(_settings(), on_demand_render=False)
+    assert specs[lc._RENDER_NAME].enabled(settings) is False
 
 
 def test_proposal_from_tool_returns_none_for_unknown_name():
