@@ -1,4 +1,4 @@
-from freecad.journeyman.markdown import wrappable_escape, wrapped_pre
+from freecad.journeyman.transcript.markup import wrappable_escape, wrapped_pre
 
 
 def test_wrappable_escape_escapes_html():

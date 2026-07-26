@@ -1,4 +1,4 @@
-from freecad.journeyman.markdown import to_html
+from freecad.journeyman.transcript.markup import to_html
 
 
 def test_common_model_markdown_is_rendered():

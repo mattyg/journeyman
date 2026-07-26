@@ -1,5 +1,5 @@
-from freecad.journeyman import history_store
-from freecad.journeyman.history_store import (
+from freecad.journeyman.transcript import storage as history_store
+from freecad.journeyman.transcript.storage import (
     OBJECT_NAME, encode, decode, is_internal_object)
 from freecad.journeyman.script_executor import ExecResult
 

@@ -5,7 +5,7 @@ import tempfile
 import FreeCAD as App
 from freecad.journeyman import document_inspector as di
 from freecad.journeyman import view_capture
-from freecad.journeyman import history_store
+from freecad.journeyman.transcript import storage as history_store
 from freecad.journeyman import api_reference
 from freecad.journeyman.script_executor import ExecResult
 from freecad.journeyman.document_session import (

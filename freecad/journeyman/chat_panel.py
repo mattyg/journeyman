@@ -7,17 +7,16 @@ from PySide import QtGui, QtCore
 import FreeCAD
 import FreeCADGui as Gui
 
-from . import (
-    document_inspector, script_executor, llm_client, view_capture, history_store,
-    transcript_export,
-)
+from . import document_inspector, script_executor, llm_client, view_capture
+from .transcript import storage as history_store
+from .transcript import export as transcript_export
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
 from .document_session import (
     DocumentSession, PinnedDocumentApp, run_with_document,
 )
 from .image_processing import reference_triptych
-from .markdown import (
+from .transcript.markup import (
     to_html as markdown_to_html,
     wrappable_escape as _wrappable_escape,
     wrapped_pre as _wrapped_pre,

@@ -13,7 +13,7 @@ def _is_inspection(message):
 
 
 def _live_inspection_index(messages):
-    from . import turn_protocol
+    from .. import turn_protocol
     for index in range(len(messages) - 1, -1, -1):
         message = messages[index]
         if _is_inspection(message):
@@ -26,7 +26,7 @@ def _live_inspection_index(messages):
 
 
 def _last_document_change_index(messages):
-    from . import turn_protocol
+    from .. import turn_protocol
     for index in range(len(messages) - 1, -1, -1):
         content = messages[index].get("content")
         if (isinstance(content, str)
@@ -37,7 +37,7 @@ def _last_document_change_index(messages):
 
 def model_history(messages):
     """Project durable events into compact provider-facing messages."""
-    from . import turn_protocol
+    from .. import turn_protocol
     live = _live_inspection_index(messages)
     changed_at = _last_document_change_index(messages)
     compact = []
@@ -86,4 +86,3 @@ class Transcript:
 
     def replace_messages(self, messages):
         self.messages = list(messages or ())
-

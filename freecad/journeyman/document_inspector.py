@@ -1,4 +1,4 @@
-from .history_store import is_internal_object
+from .transcript import is_internal_object
 
 
 def _selection_names():

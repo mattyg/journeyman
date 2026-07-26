@@ -4,7 +4,7 @@ import binascii
 import math
 import struct
 import zlib
-from .history_store import is_internal_object
+from .transcript import is_internal_object
 
 
 def changed_object_names(before, after):
