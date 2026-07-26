@@ -14,6 +14,7 @@ from . import (
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
 from .document_binding import PinnedDocumentApp, run_with_document
+from .document_session import DocumentSession
 from .image_processing import reference_triptych
 from .markdown import to_html as markdown_to_html
 from .settings import load_settings, model_display_name, PARAM_PATH
@@ -376,19 +377,9 @@ class JourneymanDockWidget(QtGui.QDockWidget):
                 }]
             agent.messages = messages
             agent.transcript.entries = entries
-            state = {
-                "agent": agent, "entries": entries,
-                "reason_seq": 0, "step_seq": 0,
-                "context_seq": 0,
-                "document": doc,
-                "scroll": 0,
-                "persistence_loaded": persistence_enabled,
-                "busy": False, "cancel_event": None,
-                "status_entry": None, "elapsed": 0,
-                "waiting_for_question": False,
-                "pending_script_tool": None,
-                "pending_info_tool": None,
-            }
+            state = DocumentSession(
+                agent, doc, entries,
+                persistence_loaded=persistence_enabled)
             state["page"], state["layout"] = self._new_transcript_page()
             self._document_states[key] = state
             self._restore_entry_widgets(state)
@@ -437,14 +428,10 @@ class JourneymanDockWidget(QtGui.QDockWidget):
 
     def _persist_state(self, state=None):
         state = state or self._document_states.get(self._document_key)
-        if state is None or state.get("document") is None:
-            return
-        if not state["agent"].settings.persist_chat_history:
+        if state is None:
             return
         try:
-            history_store.save(
-                state["document"], state["agent"].messages,
-                state["agent"].transcript.entries)
+            state.persist(history_store.save)
         except Exception:
             import traceback
             FreeCAD.Console.PrintError(
@@ -1295,11 +1282,7 @@ class JourneymanDockWidget(QtGui.QDockWidget):
         state = self._document_states[self._document_key]
         if state.get("document") is not None:
             history_store.clear(state["document"])
-        state["agent"].messages.clear()
-        state["entries"].clear()
-        state["reason_seq"] = 0
-        state["step_seq"] = 0
-        state["context_seq"] = 0
+        state.clear_conversation()
         self._reason_seq = 0
         old_page = self.log.takeWidget()
         state["page"], state["layout"] = self._new_transcript_page()
