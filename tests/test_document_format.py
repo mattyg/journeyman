@@ -87,6 +87,18 @@ def test_format_state_is_substantially_smaller_than_json():
     assert len(text) < len(as_json) / 2
 
 
+def test_a_single_property_cannot_flood_the_snapshot():
+    # A chat-history object saved under a pre-rename name once put ~367k
+    # tokens of base64 into every snapshot. Size is the backstop for whatever
+    # the name filter fails to recognise next.
+    from freecad.journeyman.document_inspector import _bounded
+    payload = "eNr" + "A" * 500000
+    bounded = _bounded(payload)
+    assert len(bounded) < 300
+    assert "truncated, 500003 chars" in bounded
+    assert _bounded("Length") == "Length"
+
+
 def test_noise_filter_drops_chrome_but_keeps_zero_values():
     assert _is_noise("Visibility", True)
     assert _is_noise("Placement", "...")

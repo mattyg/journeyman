@@ -45,9 +45,49 @@ def test_entries_to_markdown_renders_all_kinds():
     assert "### Question" in md and "`a` A — first" in md
     assert "**Selected:** a" in md
     assert "### Model request timed out" in md and "**Decision:** Stopped" in md
-    assert "_Context sent to the model (1 messages)._" in md
+    assert "### Request to the model (1 messages)" in md
+    assert "**user:**" in md
     assert "Done\nall set" in md
     assert "Working…" not in md
+
+
+def test_context_export_carries_every_message_in_full():
+    # The export must be restorable: full content, every role, nothing elided.
+    entries = [{"kind": "context", "messages": [
+        {"role": "system", "content": "SYSTEM RULES"},
+        {"role": "user", "content": "[request]\nmake a box"},
+        {"role": "assistant", "content": "(intent) add a box"},
+        {"role": "user", "content": "[current document]\nDocument: Unnamed"},
+    ]}]
+    md = entries_to_markdown(entries)
+    assert "### Request to the model (4 messages)" in md
+    for role in ("system", "user", "assistant"):
+        assert f"**{role}:**" in md
+    assert "SYSTEM RULES" in md
+    assert "[request]\nmake a box" in md
+    assert "(intent) add a box" in md
+    assert "[current document]\nDocument: Unnamed" in md
+
+
+def test_context_export_notes_images_without_inlining_base64():
+    entries = [{"kind": "context", "messages": [{"role": "user", "content": [
+        {"type": "text", "text": "look at this"},
+        {"type": "image_url",
+         "image_url": {"url": "data:image/png;base64," + "A" * 5000}},
+    ]}]}]
+    md = entries_to_markdown(entries)
+    assert "look at this" in md
+    assert "A" * 100 not in md
+    assert "5000 base64 chars" in md
+
+
+def test_context_export_handles_empty_content():
+    entries = [{"kind": "context", "messages": [
+        {"role": "user", "content": ""},
+        {"role": "assistant", "content": []},
+    ]}]
+    md = entries_to_markdown(entries)
+    assert "(empty)" in md
 
 
 def test_entries_to_markdown_empty():

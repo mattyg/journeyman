@@ -213,3 +213,18 @@ def test_advisories_block_says_the_step_ran():
 
 def test_no_advisories_renders_nothing():
     assert turn_protocol.advisories([]) == ""
+
+
+def test_render_label_distinguishes_isolated_from_whole_document():
+    assert turn_protocol.render_label(()) == (
+        "[rendered views] — whole document")
+    assert turn_protocol.render_label(("Body", "Pad")) == (
+        "[rendered views] — isolated: Body, Pad")
+
+
+def test_render_empty_names_what_failed_to_render():
+    # Naming the objects is what stops the model retrying the same bad names.
+    message = turn_protocol.render_empty(("Ghost",))
+    assert "Ghost" in message
+    assert "may not exist" in message
+    assert "no visible objects" in turn_protocol.render_empty(())

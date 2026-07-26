@@ -155,6 +155,7 @@ class JourneymanPreferencesPage:
             ("verificationCheck", "Require verification evidence before finish"),
             ("inspectionCheck", "Enable read-only document inspection tool"),
             ("viewsCheck", "Send rendered views to vision-capable models"),
+            ("renderToolCheck", "Enable on-demand rendered views tool"),
             ("rollbackCheck", "Roll back changes that fail validation"),
             ("richSnapshotCheck", "Include rich type-aware document state"),
             ("keepPartialCheck", "Keep work completed before a script error"),
@@ -164,8 +165,15 @@ class JourneymanPreferencesPage:
             setattr(self, attr, widget)
             hf.addWidget(widget)
         self.viewsCheck.setToolTip(
-            "Renders offscreen views without changing the visible camera. "
-            "Enable only for models that accept image input.")
+            "Renders offscreen views automatically after every step that "
+            "changes the document. Costs tokens on every step; prefer the "
+            "on-demand tool below. Enable only for models that accept "
+            "image input.")
+        self.renderToolCheck.setToolTip(
+            "Lets the model request rendered views when it needs them — "
+            "before acting, not just after — for the whole document or named "
+            "objects. Costs nothing on steps where it does not ask. Enable "
+            "only for models that accept image input.")
         self.edgesCheck = QtGui.QCheckBox(
             "Overlay dark technical edges")
         self.objectColorsCheck = QtGui.QCheckBox(
@@ -328,6 +336,7 @@ class JourneymanPreferencesPage:
             (self.verificationCheck, "MandatoryVerification", True),
             (self.inspectionCheck, "ReadOnlyInspection", True),
             (self.viewsCheck, "RenderedViews", False),
+            (self.renderToolCheck, "OnDemandRender", True),
             (self.rollbackCheck, "RollbackOnValidationFailure", True),
             (self.richSnapshotCheck, "RichSnapshot", True),
             (self.keepPartialCheck, "KeepPartialOnError", True),

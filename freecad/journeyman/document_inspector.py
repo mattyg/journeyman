@@ -78,6 +78,14 @@ _NOISE_PROPERTIES = frozenset((
 ))
 
 
+# No single property is worth more than a couple of lines to the model. A
+# document once carried a chat-history object the name filter no longer
+# recognised, and its compressed payload put ~367k tokens of base64 into every
+# snapshot — past the point where some models could respond at all. Truncating
+# by size means the next such property costs a line, not a session.
+_MAX_PROPERTY_CHARS = 200
+
+
 def _is_noise(name, value):
     """True for a property not worth its tokens in the model-facing state."""
     if name in _NOISE_PROPERTIES:
@@ -85,6 +93,14 @@ def _is_noise(name, value):
     # An empty string carries no information; 0 and False often do (a zero
     # Length is a real defect), so only strings are dropped on emptiness.
     return isinstance(value, str) and not value.strip()
+
+
+def _bounded(value):
+    """Cap a single property value so one field cannot flood the snapshot."""
+    if isinstance(value, str) and len(value) > _MAX_PROPERTY_CHARS:
+        return (value[:_MAX_PROPERTY_CHARS]
+                + f"… (truncated, {len(value)} chars)")
+    return value
 
 
 def _format_number(value):
@@ -225,7 +241,7 @@ def document_state(app, rich=True):
                     if isinstance(value, (str, int, float, bool)) or hasattr(value, "Value"):
                         safe = _safe_value(value)
                         if not _is_noise(name, safe):
-                            props[name] = safe
+                            props[name] = _bounded(safe)
                 except Exception:
                     pass
             if props:

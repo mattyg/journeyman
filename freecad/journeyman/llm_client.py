@@ -22,16 +22,27 @@ from dataclasses import dataclass
 
 from .settings import Settings
 
+# Spliced into SYSTEM_PROMPT and removed again when on_demand_render is off.
+# Named so the two uses cannot drift apart the way a duplicated literal would.
+_RENDER_PROMPT_LINE = (
+    "- render_views(objects): see the geometry. Returns offscreen orthographic "
+    "and isometric views — pass object names to isolate them, or omit for the "
+    "whole document. Use it when orientation, placement, seating, or which "
+    "side faces where matters, BEFORE you write the script that depends on "
+    "it. Views are dropped once a script changes the document, so render "
+    "again after an edit if you need to look.\n")
+
 SYSTEM_PROMPT = (
     "You are a CAD journeyman operating inside FreeCAD. You receive a text snapshot "
     "of the active document before each turn.\n"
     "\n"
-    "You have five tools and MUST call one on every turn (you cannot reply "
+    "You have six tools and MUST call one on every turn (you cannot reply "
     "with free text):\n"
     "- run_freecad_script(intent, script): do work. `intent` is one plain-language "
     "sentence a non-programmer will read; `script` is FreeCAD Python run against "
     "App.ActiveDocument. ALL code — including diagnostics — goes here.\n"
     "- inspect_document(query): read detailed document state without changing it.\n"
+    + _RENDER_PROMPT_LINE +
     "- ask_user(question, options): pause and let the user choose one or more "
     "structured options when a consequential ambiguity cannot be resolved from "
     "the document. Do not use it for choices you can safely make yourself.\n"
@@ -240,6 +251,27 @@ _INSPECT_PARAMETERS = {
     "required": ["query"],
 }
 
+_RENDER_NAME = "render_views"
+_RENDER_DESCRIPTION = (
+    "Render offscreen orthographic and isometric views of the document or of "
+    "named objects, without changing the visible camera or the document.")
+_RENDER_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "objects": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Internal object names to render in isolation (for example "
+                "['Body', 'Pad001']). Empty renders the whole document."),
+        },
+    },
+    # Required-but-emptyable, matching _API_PARAMETERS' treatment of `symbol`:
+    # providers that enforce strict schemas reject optional properties, and an
+    # empty list already means "whole document".
+    "required": ["objects"],
+}
+
 _QUESTION_NAME = "ask_user"
 _QUESTION_DESCRIPTION = (
     "Ask a consequential multiple-choice question and wait for the user's "
@@ -310,6 +342,9 @@ TOOL_SCHEMA = [
         "name": _INSPECT_NAME, "description": _INSPECT_DESCRIPTION,
         "parameters": _INSPECT_PARAMETERS}},
     {"type": "function", "function": {
+        "name": _RENDER_NAME, "description": _RENDER_DESCRIPTION,
+        "parameters": _RENDER_PARAMETERS}},
+    {"type": "function", "function": {
         "name": _QUESTION_NAME, "description": _QUESTION_DESCRIPTION,
         "parameters": _QUESTION_PARAMETERS}},
     {"type": "function", "function": {
@@ -325,6 +360,8 @@ ANTHROPIC_TOOL_SCHEMA = [
      "input_schema": _FINISH_PARAMETERS},
     {"name": _INSPECT_NAME, "description": _INSPECT_DESCRIPTION,
      "input_schema": _INSPECT_PARAMETERS},
+    {"name": _RENDER_NAME, "description": _RENDER_DESCRIPTION,
+     "input_schema": _RENDER_PARAMETERS},
     {"name": _QUESTION_NAME, "description": _QUESTION_DESCRIPTION,
      "input_schema": _QUESTION_PARAMETERS},
     {"name": _API_NAME, "description": _API_DESCRIPTION,
@@ -334,10 +371,12 @@ ANTHROPIC_TOOL_SCHEMA = [
 
 def _system_prompt(settings):
     tool_count = (
-        5 - int(not settings.freecad_api_lookup)
-        - int(not settings.read_only_inspection))
-    count_word = {3: "three", 4: "four", 5: "five"}[tool_count]
-    prompt = SYSTEM_PROMPT.replace("five tools", count_word + " tools")
+        6 - int(not settings.freecad_api_lookup)
+        - int(not settings.read_only_inspection)
+        - int(not settings.on_demand_render))
+    count_word = {
+        3: "three", 4: "four", 5: "five", 6: "six"}[tool_count]
+    prompt = SYSTEM_PROMPT.replace("six tools", count_word + " tools")
     if not settings.freecad_api_lookup:
         prompt = prompt.replace(
             "- lookup_freecad_api(query, module, symbol): inspect the installed "
@@ -381,6 +420,8 @@ def _system_prompt(settings):
             "")
         prompt = prompt.replace(
             "Prefer inspect_document for read-only checks. ", "")
+    if not settings.on_demand_render:
+        prompt = prompt.replace(_RENDER_PROMPT_LINE, "")
     if not settings.mandatory_verification:
         prompt = prompt.replace(", verified, evidence", "")
     return prompt
@@ -397,6 +438,8 @@ def _openai_tools(settings):
         tools = [t for t in tools if t["function"]["name"] != _API_NAME]
     if not settings.read_only_inspection:
         tools = [t for t in tools if t["function"]["name"] != _INSPECT_NAME]
+    if not settings.on_demand_render:
+        tools = [t for t in tools if t["function"]["name"] != _RENDER_NAME]
     if not settings.mandatory_verification:
         finish = next(t["function"] for t in tools
                       if t["function"]["name"] == _FINISH_NAME)
@@ -504,6 +547,7 @@ class LLMProposal:
     api_query: str = ""
     api_module: str = ""
     api_symbol: str = ""
+    render_objects: tuple = ()
 
     @property
     def is_finish(self) -> bool:
@@ -777,7 +821,7 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
     """Build the LLMProposal for one tool call, provider-independent.
 
     Both the OpenAI-compatible and Anthropic adapters reduce their wire format
-    to a ``(name, args)`` pair and hand off here, so the five proposal shapes
+    to a ``(name, args)`` pair and hand off here, so the six proposal shapes
     are constructed in exactly one place. Returns ``None`` for an unrecognized
     tool name; the caller decides how to handle that (treat text as a finish).
     """
@@ -811,6 +855,11 @@ def _proposal_from_tool(name, args, reasoning="", text=""):
         return LLMProposal(
             "", "", "", False, reasoning=reasoning, kind="inspect",
             query=args.get("query", ""))
+    if name == _RENDER_NAME:
+        return LLMProposal(
+            "", "", "", False, reasoning=reasoning, kind="render",
+            render_objects=tuple(
+                str(item) for item in (args.get("objects") or ()) if item))
     if name == _QUESTION_NAME:
         return _question_proposal(args, reasoning)
     if name == _API_NAME:
@@ -933,7 +982,7 @@ def _complete_anthropic(wire_model: str, messages: list,
     text = "".join(text_parts)
     # Prefer a work/finish tool over the read-only tools if several appear.
     for name in (_TOOL_NAME, _FINISH_NAME, _INSPECT_NAME, _QUESTION_NAME,
-                 _API_NAME):
+                 _API_NAME, _RENDER_NAME):
         if name in tool_blocks:
             return _proposal_from_tool(
                 name, tool_blocks[name].get("input"), reasoning, text)

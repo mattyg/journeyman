@@ -894,7 +894,8 @@ class JourneymanDockWidget(QtGui.QDockWidget):
         self._add_entry_widget(state, entry)
         if tool == "run_freecad_script":
             state["pending_script_tool"] = entry
-        elif tool in ("inspect_document", "lookup_freecad_api"):
+        elif tool in ("inspect_document", "lookup_freecad_api",
+                      "render_views"):
             state["pending_info_tool"] = entry
 
     def _update_tool_result(self, key, tool, summary, content):

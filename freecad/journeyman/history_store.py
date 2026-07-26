@@ -7,12 +7,27 @@ from .types import ExecResult
 
 
 OBJECT_NAME = "JourneymanChatHistory"
+# Names this object has been saved under. The workbench was renamed, and a
+# document written before the rename still holds the old one — which the
+# inspector must keep recognising, or the compressed transcript is dumped into
+# every snapshot sent to the model.
+LEGACY_OBJECT_NAMES = ("LLMCopilotChatHistory",)
+OBJECT_NAMES = (OBJECT_NAME,) + LEGACY_OBJECT_NAMES
 PROPERTY_NAME = "Payload"
 FORMAT_VERSION = 1
 
 
 def is_internal_object(obj):
-    return getattr(obj, "Name", "") == OBJECT_NAME
+    return getattr(obj, "Name", "") in OBJECT_NAMES
+
+
+def history_object(doc):
+    """The document's chat-history object under any name it has been saved as."""
+    for name in OBJECT_NAMES:
+        obj = doc.getObject(name)
+        if obj is not None:
+            return obj
+    return None
 
 
 def _entry_to_data(entry):
@@ -80,7 +95,7 @@ def save(doc, messages, entries):
 
 
 def load(doc):
-    obj = doc.getObject(OBJECT_NAME)
+    obj = history_object(doc)
     if obj is None or not hasattr(obj, PROPERTY_NAME):
         return [], []
     try:
@@ -90,5 +105,6 @@ def load(doc):
 
 
 def clear(doc):
-    if doc.getObject(OBJECT_NAME) is not None:
-        doc.removeObject(OBJECT_NAME)
+    obj = history_object(doc)
+    if obj is not None:
+        doc.removeObject(obj.Name)

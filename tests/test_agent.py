@@ -441,6 +441,51 @@ def test_stale_inspection_leaves_the_transcript_but_not_the_request():
     assert "You inspected: first look" in stale[0]["content"]
 
 
+def test_recorded_context_is_exactly_what_was_sent():
+    # The transcript is the only artefact left to debug a bad turn from, so
+    # the record must be the request itself, not a reconstruction of it.
+    client = FakeClient([
+        LLMProposal("", "", "", False, kind="inspect", query="look"),
+        LLMProposal("make box", "pass", "", True),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    seen = []
+    agent = _agent(
+        client, FakeExecutor([ExecResult(True, "", "", True, "valid", True)]),
+        _settings(auto_approve_loop=True))
+    agent.send("build", lambda i: True, lambda r, s, i, p: None,
+               on_context=lambda m: seen.append(list(m)))
+    assert len(seen) == len(client.calls)
+    for recorded, sent in zip(seen, client.calls):
+        assert [m for m in recorded if m.get("role") != "system"] == sent
+
+
+def test_recorded_context_carries_the_system_prompt():
+    client = FakeClient([LLMProposal("", "", "Done", False, kind="finish")])
+    client.system_prompt = lambda settings: "SYSTEM RULES"
+    seen = []
+    _agent(client, FakeExecutor([]), _settings()).send(
+        "hi", lambda i: True, lambda r, s, i, p: None,
+        on_context=lambda m: seen.append(list(m)))
+    assert seen[0][0] == {"role": "system", "content": "SYSTEM RULES"}
+
+
+def test_recorded_context_reflects_superseded_inspections():
+    # The record must show the reduced history the model actually received,
+    # not the full transcript retained for the UI.
+    client = FakeClient([
+        LLMProposal("", "", "", False, kind="inspect", query="first"),
+        LLMProposal("", "", "", False, kind="inspect", query="second"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    seen = []
+    _agent(client, FakeExecutor([]), _settings()).send(
+        "look", lambda i: True, lambda r, s, i, p: None,
+        on_context=lambda m: seen.append(list(m)))
+    final = "".join(str(m["content"]) for m in seen[-1])
+    assert "[superseded inspection]" in final
+
+
 def test_multiple_choice_answer_resumes_same_agent_turn():
     options = (
         {"id": "flush", "label": "Flush", "description": "Level with face."},
@@ -1791,3 +1836,155 @@ def test_the_model_is_told_when_it_already_has_a_valid_solid():
     sent = str(client.calls[-1])
     assert "The document holds a valid solid" in sent
     assert "if it already meets them, finish" in sent
+
+
+# --- on-demand rendered views ---------------------------------------------
+
+def _capture(recorder, images=(("view", "PNGDATA"),)):
+    """A view_capture double that records its arguments."""
+    def capture(names, strategy, limit, **options):
+        recorder.append((tuple(names), strategy, limit, options))
+        return [{"label": label, "data": data} for label, data in images]
+    return capture
+
+
+def _render_agent(capture, settings=None):
+    return Agent(
+        client=None, inspector=lambda _app: "DOC", executor=None,
+        app=object(), settings=settings or _settings(),
+        view_capture=capture)
+
+
+def test_render_without_objects_captures_the_whole_document():
+    calls = []
+    agent = _render_agent(_capture(calls))
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    names, strategy, _limit, _options = calls[0]
+    assert (names, strategy) == ((), "global")
+
+
+def test_render_with_objects_isolates_them():
+    calls = []
+    agent = _render_agent(_capture(calls))
+    agent._handle_render(
+        LLMProposal("", "", "", False, kind="render",
+                    render_objects=("Body", "Pad001")), None)
+    names, strategy, _limit, _options = calls[0]
+    assert (names, strategy) == (("Body", "Pad001"), "changed")
+
+
+def test_render_limit_never_clips_an_explicit_request():
+    # max_isolated_images caps the automatic post-step capture; an explicit
+    # request for more objects than that must still render all of them.
+    calls = []
+    agent = _render_agent(
+        _capture(calls), _settings(max_isolated_images=1))
+    agent._handle_render(
+        LLMProposal("", "", "", False, kind="render",
+                    render_objects=("A", "B", "C")), None)
+    assert calls[0][2] == 3
+
+
+def test_render_passes_image_quality_settings_through():
+    calls = []
+    agent = _render_agent(_capture(calls))
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    assert calls[0][3] == {
+        "technical_edges": True, "object_colors": True, "depth_shading": True}
+
+
+def test_render_feeds_back_tagged_image_blocks():
+    agent = _render_agent(_capture([]))
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    message = agent.messages[-1]
+    assert message["ephemeral"] == "render"
+    assert [block["type"] for block in message["content"]] == [
+        "text", "text", "image_url"]
+    assert message["content"][-1]["image_url"]["url"].startswith(
+        "data:image/png;base64,")
+
+
+def test_render_reports_when_nothing_could_be_rendered():
+    # An empty image block would leave the model retrying blindly.
+    agent = _render_agent(lambda *_a, **_k: [])
+    agent._handle_render(
+        LLMProposal("", "", "", False, kind="render",
+                    render_objects=("Ghost",)), None)
+    content = agent.messages[-1]["content"]
+    assert isinstance(content, str)
+    assert "Ghost" in content and "may not exist" in content
+
+
+def test_render_survives_a_legacy_three_argument_capture():
+    calls = []
+    def three_args(names, strategy, limit):
+        calls.append((tuple(names), strategy, limit))
+        return [{"label": "v", "data": "D"}]
+    agent = _render_agent(three_args)
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    assert calls == [((), "global", 4)]
+
+
+def test_render_is_a_no_op_without_a_capture_callback():
+    agent = _render_agent(None)
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    assert isinstance(agent.messages[-1]["content"], str)
+
+
+def test_renders_taken_since_the_last_change_all_survive():
+    # Views are directional: a second angle complements the first rather than
+    # superseding it, unlike inspections.
+    agent = _render_agent(_capture([]))
+    for _ in range(2):
+        agent._handle_render(
+            LLMProposal("", "", "", False, kind="render"), None)
+    rendered = [m for m in _model_history(agent.messages)
+                if isinstance(m.get("content"), list)]
+    assert len(rendered) == 2
+
+
+def test_renders_are_dropped_once_a_script_changes_the_document():
+    agent = _render_agent(_capture([]))
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    agent.messages.append({"role": "user", "content": "[executed OK]\nmoved"})
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    rendered = [m for m in _model_history(agent.messages)
+                if isinstance(m.get("content"), list)]
+    assert len(rendered) == 1
+
+
+def test_render_marker_never_reaches_the_wire():
+    # Both providers forward message dicts verbatim.
+    agent = _render_agent(_capture([]))
+    agent._handle_render(LLMProposal("", "", "", False, kind="render"), None)
+    assert all("ephemeral" not in m for m in _model_history(agent.messages))
+
+
+def test_render_tool_call_is_reported_to_the_ui():
+    client = FakeClient([
+        LLMProposal("", "", "", False, kind="render"),
+        LLMProposal("", "", "Done", False, kind="finish"),
+    ])
+    seen = []
+    agent = Agent(
+        client=client, inspector=lambda _app: "DOC",
+        executor=FakeExecutor([]), app=object(),
+        settings=_settings(auto_approve_loop=True),
+        view_capture=_capture([]))
+    agent.send("look at it", lambda _i: True, lambda *_a: None,
+               on_tool=lambda tool, summary, details: seen.append(tool))
+    assert "render_views" in seen
+
+
+def test_render_tool_is_skipped_when_disabled():
+    calls = []
+    client = FakeClient([
+        LLMProposal("", "", "", False, kind="render"),
+    ])
+    agent = Agent(
+        client=client, inspector=lambda _app: "DOC",
+        executor=FakeExecutor([]), app=object(),
+        settings=_settings(auto_approve_loop=True, on_demand_render=False),
+        view_capture=_capture(calls))
+    agent.send("look at it", lambda _i: True, lambda *_a: None)
+    assert calls == []

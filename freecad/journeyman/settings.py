@@ -79,9 +79,11 @@ class Settings:
     stage_order_guidance: bool = False
     design_ledger_context: bool = False
     final_design_review: bool = False
-    technical_edge_overlay: bool = False
-    color_separate_objects: bool = False
-    depth_enhanced_shading: bool = False
+    # These three default True to match load_settings and the Preferences UI;
+    # a directly-constructed Settings() previously disagreed with both.
+    technical_edge_overlay: bool = True
+    color_separate_objects: bool = True
+    depth_enhanced_shading: bool = True
     freecad_api_lookup: bool = True
     assumption_ledger: bool = False
     fidelity_target: str = "unspecified"
@@ -91,6 +93,7 @@ class Settings:
     feature_retry_cap: int = 2
     one_feature_per_step: bool = False
     keep_partial_on_error: bool = True
+    on_demand_render: bool = True
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -305,6 +308,7 @@ def load_settings(param_get) -> "Settings":
         fidelity_target=fidelity_target,
         mark_inferred_features=param_get.GetBool(
             "MarkInferredFeatures", False),
+        on_demand_render=param_get.GetBool("OnDemandRender", True),
     )
 
 
@@ -349,6 +353,7 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetBool("AssumptionLedger", settings.assumption_ledger)
     param_get.SetString("FidelityTarget", settings.fidelity_target)
     param_get.SetBool("MarkInferredFeatures", settings.mark_inferred_features)
+    param_get.SetBool("OnDemandRender", settings.on_demand_render)
     if "/" in settings.model:
         provider, bare = settings.model.split("/", 1)
         if provider in PROVIDERS:

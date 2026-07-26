@@ -147,6 +147,66 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("right, top, bottom", images[0]["label"])
         self.assertTrue(images[0]["data"].startswith("iVBOR"))
 
+    def test_on_demand_render_tool_isolates_a_named_body(self):
+        """The render tool end-to-end against real geometry.
+
+        Unit tests stub the capture callback, so only this proves the tool's
+        name filtering reaches _final_shape_objects and produces real pixels.
+        """
+        from freecad.journeyman.agent import Agent
+        from freecad.journeyman.llm_client import LLMProposal
+        from freecad.journeyman.settings import Settings
+
+        doc = App.newDocument("T")
+        doc.addObject("Part::Box", "Keep")
+        far = doc.addObject("Part::Box", "Skip")
+        far.Placement.Base.x = 40
+        doc.recompute()
+
+        def capture(names, strategy, limit, **options):
+            return view_capture.capture(
+                App, names, strategy=strategy, max_isolated=limit, **options)
+
+        agent = Agent(
+            client=None, inspector=lambda _app: "DOC", executor=None,
+            app=App, settings=Settings("m", "", "", True, False, 5, 3),
+            view_capture=capture)
+        agent._handle_render(
+            LLMProposal("", "", "", False, kind="render",
+                        render_objects=("Keep",)), None)
+
+        content = agent.messages[-1]["content"]
+        self.assertIsInstance(content, list)
+        labels = [b["text"] for b in content if b["type"] == "text"]
+        self.assertTrue(any("Keep" in label for label in labels))
+        self.assertFalse(any("Skip" in label for label in labels))
+        images = [b for b in content if b["type"] == "image_url"]
+        self.assertEqual(len(images), 1)
+        self.assertTrue(images[0]["image_url"]["url"].startswith(
+            "data:image/png;base64,iVBOR"))
+
+    def test_on_demand_render_reports_an_unknown_object_name(self):
+        from freecad.journeyman.agent import Agent
+        from freecad.journeyman.llm_client import LLMProposal
+        from freecad.journeyman.settings import Settings
+
+        App.newDocument("T")
+
+        def capture(names, strategy, limit, **options):
+            return view_capture.capture(
+                App, names, strategy=strategy, max_isolated=limit, **options)
+
+        agent = Agent(
+            client=None, inspector=lambda _app: "DOC", executor=None,
+            app=App, settings=Settings("m", "", "", True, False, 5, 3),
+            view_capture=capture)
+        agent._handle_render(
+            LLMProposal("", "", "", False, kind="render",
+                        render_objects=("NoSuchBody",)), None)
+        content = agent.messages[-1]["content"]
+        self.assertIsInstance(content, str)
+        self.assertIn("NoSuchBody", content)
+
     def test_technical_render_adds_edges_colors_and_depth_shading(self):
         doc = App.newDocument("T")
         first = doc.addObject("Part::Box", "First")
@@ -169,6 +229,35 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("Installed FreeCAD version:", result)
         self.assertIn("Part.makeBox", result)
         self.assertLessEqual(len(result), 12000)
+
+    def test_legacy_history_object_is_hidden_from_the_snapshot(self):
+        """A document saved before the rename carries LLMCopilotChatHistory.
+
+        Unrecognised, its compressed payload went into every snapshot — one
+        real document put ~367k tokens of base64 in front of the model.
+        """
+        doc = App.newDocument("T")
+        doc.addObject("Part::Box", "Box")
+        obj = doc.addObject("App::FeaturePython", "LLMCopilotChatHistory")
+        obj.addProperty("App::PropertyString", "Payload")
+        obj.Payload = "eNr" + "A" * 200000
+        doc.recompute()
+        snapshot = di.snapshot(App, rich=True)
+        self.assertNotIn("LLMCopilotChatHistory", snapshot)
+        self.assertNotIn("eNrAAA", snapshot)
+        self.assertIn("Box", snapshot)
+        self.assertLess(len(snapshot), 10000)
+
+    def test_an_oversized_property_is_truncated_not_dumped(self):
+        """Size is the backstop for whatever the name filter misses next."""
+        doc = App.newDocument("T")
+        box = doc.addObject("Part::Box", "Box")
+        box.addProperty("App::PropertyString", "Blob")
+        box.Blob = "Z" * 100000
+        doc.recompute()
+        snapshot = di.snapshot(App, rich=True)
+        self.assertIn("truncated, 100000 chars", snapshot)
+        self.assertLess(len(snapshot), 10000)
 
     def test_history_persists_inside_saved_document_and_is_hidden(self):
         doc = App.newDocument("T")

@@ -31,6 +31,26 @@ def _is_ephemeral_inspection(message):
     return isinstance(content, str) and content.startswith(_INSPECTION_HEADERS)
 
 
+def _image_blocks(header, images):
+    """Multi-part content: a header, then a label+image pair per view.
+
+    Shared by the post-execution capture and the on-demand render tool so both
+    reach the model in exactly one wire shape.
+    """
+    content = [{"type": "text", "text": header}]
+    for image in images:
+        if isinstance(image, str):  # legacy/custom capture
+            label, data = "Rendered view", image
+        else:
+            label, data = image["label"], image["data"]
+        content.append({"type": "text", "text": label})
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": "data:image/png;base64," + data},
+        })
+    return content
+
+
 def _live_inspection_index(messages):
     """Index of the one inspection still worth its tokens, or ``None``.
 
@@ -53,6 +73,28 @@ def _live_inspection_index(messages):
     return None
 
 
+def _last_document_change_index(messages):
+    """Index of the most recent result that moved the document, or ``None``."""
+    from . import turn_protocol
+    for index in range(len(messages) - 1, -1, -1):
+        content = messages[index].get("content")
+        if (isinstance(content, str)
+                and turn_protocol.is_document_changing_result(content)):
+            return index
+    return None
+
+
+def _is_ephemeral_render(message):
+    """True for an on-demand render's images.
+
+    Unlike inspections there is no string-prefix fallback: render content is a
+    list of image blocks, so only the tag identifies it. A render reloaded from
+    a history written before this tag existed therefore survives — acceptable,
+    because the next document change drops it anyway.
+    """
+    return message.get("ephemeral") == "render"
+
+
 def _model_history(messages):
     """The model-facing projection of the durable transcript.
 
@@ -64,8 +106,18 @@ def _model_history(messages):
     """
     from . import turn_protocol
     live = _live_inspection_index(messages)
+    changed_at = _last_document_change_index(messages)
     compact = []
     for index, message in enumerate(messages):
+        # Renders taken before the last document change depict geometry that
+        # no longer exists. Unlike a stale inspection they cannot be collapsed
+        # to a note the model can reason about — an image carries no timestamp
+        # — so they are dropped outright. Renders since that change all stay:
+        # views are directional, so a second angle complements the first
+        # rather than superseding it (contrast _live_inspection_index).
+        if _is_ephemeral_render(message) and (
+                changed_at is not None and index < changed_at):
+            continue
         item = dict(message)
         # Load-bearing, not tidiness: both providers forward message dicts
         # verbatim, so an unstripped marker key would reach the wire payload.
@@ -217,6 +269,33 @@ class DocumentAccess:
             return reader(self._app, query, module, symbol)
         from . import api_reference
         return api_reference.lookup(self._app, query, module, symbol)
+
+    def render(self, objects=()):
+        """Render on request: named objects in isolation, else the document.
+
+        Reuses the post-execution capture callback, so on-demand and automatic
+        renders produce identical imagery. Named objects ride the "changed"
+        strategy because :func:`view_capture._final_shape_objects` already
+        filters to a name set — there is no separate isolation path to add.
+        """
+        capture = self._agent.view_capture
+        if capture is None:
+            return []
+        names = tuple(objects)
+        strategy = "changed" if names else "global"
+        settings = self._agent.settings
+        # max_isolated caps how many named objects render separately; it must
+        # not clip an explicit request, so raise the ceiling to what was asked.
+        limit = max(len(names), settings.max_isolated_images)
+        try:
+            return capture(
+                names, strategy, limit,
+                technical_edges=settings.technical_edge_overlay,
+                object_colors=settings.color_separate_objects,
+                depth_shading=settings.depth_enhanced_shading)
+        except TypeError:
+            # Compatibility with custom/legacy three-argument capture callbacks.
+            return capture(names, strategy, limit)
 
 
 class Agent:
@@ -432,6 +511,38 @@ class Agent:
         turn.ledger["assumptions"] = merged
         return None
 
+    def _handle_render(self, proposal, turn, on_tool_result=None):
+        """On-demand rendering: capture views now and feed them back.
+
+        Unlike the post-execution capture, this runs *before* the model
+        commits to a script, which is where orientation and placement
+        ambiguity actually bites. The images are tagged ephemeral so
+        :func:`_model_history` drops them once a script moves the document —
+        a stale render carries no self-evident contradiction with the current
+        snapshot, so it must not outlive the state it depicts.
+        """
+        from . import turn_protocol
+        objects = tuple(proposal.render_objects)
+        images = self.access.render(objects)
+        label = turn_protocol.render_label(objects)
+        self.messages.append({
+            "role": "assistant",
+            "content": f"(rendered views) {label}"})
+        if images:
+            content = _image_blocks(label, images)
+        else:
+            content = turn_protocol.render_empty(objects)
+        self.messages.append({
+            "role": "user",
+            "content": content,
+            "ephemeral": "render",
+        })
+        if on_tool_result is not None:
+            on_tool_result(
+                "render_views", label,
+                label if images else content)
+        return LOOP
+
     def _handle_inspect(self, proposal, turn, on_tool_result=None):
         """Read-only inspection: run the query, feed the result back."""
         from . import turn_protocol
@@ -615,8 +726,6 @@ class Agent:
                 self.messages.append({"role": "assistant", "content": note})
                 raise AgentCancelled(note)
 
-        context_cursor = len(self.messages)
-        include_system_context = context_cursor == 0
         check_cancelled()
         snap = self.access.snapshot()
         current_snapshot = snap
@@ -638,31 +747,30 @@ class Agent:
         ledger = turn.ledger  # same dict; a short alias for the execution block
         while True:
             check_cancelled()
-            if on_context is not None and context_cursor < len(self.messages):
-                context_messages = list(self.messages[context_cursor:])
-                if include_system_context:
-                    prompt_reader = getattr(self.client, "system_prompt", None)
-                    if prompt_reader is not None:
-                        context_messages.insert(0, {
-                            "role": "system",
-                            "content": prompt_reader(self.settings),
-                        })
-                    include_system_context = False
-                context_messages.append({
-                    "role": "user",
-                    "content": turn_protocol.current_context(
-                        current_snapshot, ledger, self.settings),
-                })
-                on_context(context_messages)
-                context_cursor = len(self.messages)
+            # Build the request once and hand the *same* list to the recorder
+            # and to the provider. Recording a separately-assembled
+            # approximation is how the transcript came to disagree with what
+            # was actually sent — and the transcript is the only artefact left
+            # to debug a bad turn from.
+            model_messages = _model_history(self.messages)
+            model_messages.append({
+                "role": "user",
+                "content": turn_protocol.current_context(
+                    current_snapshot, ledger, self.settings),
+            })
+            if on_context is not None:
+                request = list(model_messages)
+                prompt_reader = getattr(self.client, "system_prompt", None)
+                if prompt_reader is not None:
+                    # The system prompt is a top-level field on the wire, not a
+                    # message; surface it as one so the record is complete.
+                    request.insert(0, {
+                        "role": "system",
+                        "content": prompt_reader(self.settings),
+                    })
+                on_context(request)
             check_cancelled()
             try:
-                model_messages = _model_history(self.messages)
-                model_messages.append({
-                    "role": "user",
-                    "content": turn_protocol.current_context(
-                        current_snapshot, ledger, self.settings),
-                })
                 proposal = self.client.complete(model_messages, self.settings)
             except LLMTimeoutError as exc:
                 if on_timeout is not None and on_timeout(str(exc)):
@@ -720,8 +828,15 @@ class Agent:
                         "lookup_freecad_api",
                         target or proposal.api_query,
                         proposal.api_query)
+                elif proposal.kind == "render":
+                    from . import turn_protocol
+                    label = turn_protocol.render_label(proposal.render_objects)
+                    on_tool("render_views", label, label)
             if proposal.kind == "inspect" and self.settings.read_only_inspection:
                 self._handle_inspect(proposal, turn, on_tool_result)
+                continue
+            if proposal.kind == "render" and self.settings.on_demand_render:
+                self._handle_render(proposal, turn, on_tool_result)
                 continue
             if proposal.kind == "question":
                 if turn.assumption_clarification:
@@ -939,20 +1054,11 @@ class Agent:
                             self.settings.render_strategy,
                             self.settings.max_isolated_images)
                     if images:
-                        content = [{"type": "text", "text":
-                                    "[offscreen rendered views after execution]"}]
-                        for image in images:
-                            if isinstance(image, str):  # legacy/custom capture
-                                label, data = "Rendered view", image
-                            else:
-                                label, data = image["label"], image["data"]
-                            content.append({"type": "text", "text": label})
-                            content.append({
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": "data:image/png;base64," + data},
-                            })
-                        self.messages.append({"role": "user", "content": content})
+                        self.messages.append({
+                            "role": "user",
+                            "content": _image_blocks(
+                                "[offscreen rendered views after execution]",
+                                images)})
                 if turn.executed_steps >= self.settings.max_auto_approved_steps:
                     summary = ("Paused after reaching the step limit "
                                f"({self.settings.max_auto_approved_steps}). "

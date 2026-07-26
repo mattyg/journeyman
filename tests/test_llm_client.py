@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import pytest
@@ -60,6 +61,9 @@ def test_proposal_from_tool_covers_every_kind():
         "question": "which?",
         "options": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]})
     assert question.kind == "question" and len(question.options) == 2
+
+    render = lc._proposal_from_tool(lc._RENDER_NAME, {"objects": ["Body"]})
+    assert render.kind == "render" and render.render_objects == ("Body",)
 
 
 def test_proposal_from_tool_returns_none_for_unknown_name():
@@ -723,3 +727,47 @@ def test_backoff_grows_and_stays_within_bounds():
 def test_unparsable_retry_after_falls_back_to_backoff():
     err = _FakeHTTPError(429, retry_after="Wed, 21 Oct 2026 07:28:00 GMT")
     assert lc._retry_after_seconds(err) is None
+
+
+# --- render_views tool ------------------------------------------------------
+
+def test_render_tool_is_offered_to_both_providers():
+    settings = _settings()
+    assert lc._RENDER_NAME in [
+        t["function"]["name"] for t in lc._openai_tools(settings)]
+    assert lc._RENDER_NAME in [
+        t["name"] for t in lc._anthropic_tools(settings)]
+
+
+def test_render_tool_is_withheld_when_disabled():
+    settings = dataclasses.replace(_settings(), on_demand_render=False)
+    assert lc._RENDER_NAME not in [
+        t["function"]["name"] for t in lc._openai_tools(settings)]
+    assert lc._RENDER_NAME not in [
+        t["name"] for t in lc._anthropic_tools(settings)]
+    assert "render_views" not in lc.system_prompt(settings)
+
+
+def test_render_objects_default_to_the_whole_document():
+    assert lc._proposal_from_tool(lc._RENDER_NAME, {}).render_objects == ()
+    assert lc._proposal_from_tool(
+        lc._RENDER_NAME, {"objects": []}).render_objects == ()
+    # Blank names would render nothing and read as a failed lookup.
+    assert lc._proposal_from_tool(
+        lc._RENDER_NAME, {"objects": ["", "X"]}).render_objects == ("X",)
+
+
+@pytest.mark.parametrize("api,inspect,render", [
+    (a, i, r) for a in (True, False) for i in (True, False)
+    for r in (True, False)])
+def test_stated_tool_count_matches_the_tools_offered(api, inspect, render):
+    # The prompt opens by telling the model how many tools it has; a stale
+    # count invites it to hunt for one that was never sent.
+    settings = dataclasses.replace(
+        _settings(), freecad_api_lookup=api, read_only_inspection=inspect,
+        on_demand_render=render)
+    words = {"three": 3, "four": 4, "five": 5, "six": 6}
+    line = next(l for l in lc.system_prompt(settings).splitlines()
+                if "MUST call one" in l)
+    stated = next(words[w] for w in words if f"You have {w} tools" in line)
+    assert stated == len(lc._openai_tools(settings))

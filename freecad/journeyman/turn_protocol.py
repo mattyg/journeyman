@@ -35,6 +35,29 @@ def inspection_result(inspected, *, verify_stage=False):
     return header + inspected
 
 
+RENDER_HEADER = "[rendered views]"
+
+
+def render_label(objects):
+    """The header block introducing on-demand rendered views."""
+    if objects:
+        return f"{RENDER_HEADER} — isolated: {', '.join(objects)}"
+    return f"{RENDER_HEADER} — whole document"
+
+
+def render_empty(objects):
+    """Nothing could be rendered: say why, so the model does not retry blindly."""
+    if objects:
+        return (
+            f"{RENDER_HEADER}\nNothing was rendered for: "
+            f"{', '.join(objects)}.\nThose names may not exist, may not be "
+            "final shape objects, or may have no geometry yet. Check the "
+            "current document for the exact object names.")
+    return (
+        f"{RENDER_HEADER}\nNothing was rendered — the document has no visible "
+        "objects with geometry yet.")
+
+
 def superseded_inspection(query, *, verify_stage=False):
     """A stale inspection's result, dropped in favour of a newer view.
 

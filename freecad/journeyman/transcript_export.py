@@ -33,6 +33,48 @@ def _result_lines(result):
     return lines
 
 
+def _message_content_lines(content):
+    """Render one message's content, whether plain text or a block list.
+
+    Image blocks are noted rather than inlined: a base64 payload is hundreds of
+    kilobytes that no reader can check by eye, and it would bury the text the
+    export exists to show.
+    """
+    if isinstance(content, str):
+        return ["```", content.rstrip() or "(empty)", "```"]
+    lines = []
+    for block in content or ():
+        if not isinstance(block, dict):
+            lines += ["```", str(block).rstrip(), "```"]
+            continue
+        kind = block.get("type")
+        if kind == "text":
+            lines += ["```", str(block.get("text", "")).rstrip(), "```"]
+        elif kind == "image_url":
+            url = str((block.get("image_url") or {}).get("url", ""))
+            prefix, _, payload = url.partition(",")
+            lines.append(
+                f"_[image: {prefix or 'inline'}, {len(payload)} base64 chars]_")
+        else:
+            lines.append(f"_[{kind or 'unknown'} block]_")
+    return lines or ["```", "(empty)", "```"]
+
+
+def _context_lines(entry):
+    """Render a model request exactly as it went over the wire.
+
+    This is the record that makes a bad turn diagnosable — and restorable — so
+    it carries every message in full rather than a summary. See
+    ``Agent.send``, which hands the recorder the same list it sends.
+    """
+    messages = entry.get("messages", [])
+    lines = [f"### Request to the model ({len(messages)} messages)"]
+    for message in messages:
+        lines += ["", f"**{message.get('role', 'unknown')}:**", ""]
+        lines += _message_content_lines(message.get("content"))
+    return lines
+
+
 def _entry_to_markdown(entry):
     kind = entry.get("kind")
     if kind == "user":
@@ -64,8 +106,7 @@ def _entry_to_markdown(entry):
             lines += _result_lines(result)
         return lines
     if kind == "context":
-        count = len(entry.get("messages", []))
-        return [f"_Context sent to the model ({count} messages)._"]
+        return _context_lines(entry)
     if kind == "question":
         lines = ["### Question", "", entry.get("question", "")]
         for option in entry.get("options", []):

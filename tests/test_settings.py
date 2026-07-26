@@ -198,3 +198,23 @@ def test_harness_feature_flags_roundtrip():
     assert loaded.assumption_ledger is True
     assert loaded.fidelity_target == "stylised"
     assert loaded.mark_inferred_features is True
+
+
+def test_image_quality_defaults_agree_with_load_settings():
+    # These three once defaulted False on the dataclass but True in
+    # load_settings, so a directly-constructed Settings() (tests, eval runner)
+    # silently rendered without edges, colour separation, or depth shading.
+    loaded = load_settings(FakeParam())
+    direct = Settings("m", "", "", True, False, 5, 3)
+    for field in ("technical_edge_overlay", "color_separate_objects",
+                  "depth_enhanced_shading", "on_demand_render"):
+        assert getattr(direct, field) is True
+        assert getattr(loaded, field) is getattr(direct, field)
+
+
+def test_on_demand_render_round_trips():
+    params = FakeParam()
+    settings = load_settings(params)
+    settings.on_demand_render = False
+    save_settings(params, settings)
+    assert load_settings(params).on_demand_render is False
