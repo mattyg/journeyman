@@ -191,11 +191,44 @@ def _object_lines(item):
     return lines
 
 
+class DocumentState(dict):
+    """Structured document snapshot with its common derived operations.
+
+    It remains mapping-compatible for serialized histories and lightweight test
+    doubles, while giving production callers one owner for the state schema.
+    """
+
+    def delta_from(self, previous):
+        return DocumentDelta(previous, self)
+
+    def health(self):
+        solids = volume = 0
+        invalid = []
+        for name, item in self.get("objects", {}).items():
+            shape = item.get("shape") or {}
+            if shape.get("inspection_error"):
+                continue
+            solids += int(shape.get("solids") or 0)
+            volume += float(shape.get("volume") or 0.0)
+            if shape.get("valid") is False:
+                invalid.append(name)
+        return solids, volume, invalid
+
+    def structured_diff_from(self, previous):
+        return self.delta_from(previous).structured()
+
+
+def as_document_state(value):
+    """Adapt serialized/test mapping state to the behavior-bearing type."""
+    return value if isinstance(value, DocumentState) else DocumentState(value or {})
+
+
 def document_state(app, rich=True):
     """Return stable structured state suitable for diffs and model inspection."""
     doc = getattr(app, "ActiveDocument", None)
     if doc is None:
-        return {"document": None, "selection": [], "objects": {}}
+        return DocumentState(
+            {"document": None, "selection": [], "objects": {}})
     objects = {}
     for obj in doc.Objects:
         if is_internal_object(obj):
@@ -256,11 +289,11 @@ def document_state(app, rich=True):
             if state:
                 item["state"] = state
         objects[obj.Name] = item
-    return {
+    return DocumentState({
         "document": doc.Name,
         "selection": _selection_names(),
         "objects": objects,
-    }
+    })
 
 
 class DocumentDelta:
@@ -273,8 +306,10 @@ class DocumentDelta:
     """
 
     def __init__(self, before, after):
-        self.old = before.get("objects", {})
-        self.new = after.get("objects", {})
+        self.before = as_document_state(before)
+        self.after = as_document_state(after)
+        self.old = self.before.get("objects", {})
+        self.new = self.after.get("objects", {})
 
     @property
     def created(self):
@@ -335,7 +370,7 @@ class DocumentDelta:
 
 
 def structured_diff(before, after):
-    return DocumentDelta(before, after).structured()
+    return as_document_state(after).structured_diff_from(before)
 
 
 def validate(app, names=None):

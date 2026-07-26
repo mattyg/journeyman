@@ -446,7 +446,7 @@ def buildable_summary(state):
     valid solid of this size" is a fact — and a run that already had a finished
     part spent six further turns degrading it because nothing ever said so.
     """
-    solids, volume, invalid = _solid_health(state)
+    solids, volume, invalid = solid_health(state)
     if invalid or not solids:
         return ""
     biggest = None
@@ -472,19 +472,10 @@ def buildable_summary(state):
         "further; if it already meets them, finish."
 
 
-def _solid_health(state):
-    """Total solids, total volume, and validity across a document state."""
-    solids = volume = 0
-    invalid = []
-    for name, item in (state.get("objects") or {}).items():
-        shape = item.get("shape") or {}
-        if shape.get("inspection_error"):
-            continue
-        solids += int(shape.get("solids") or 0)
-        volume += float(shape.get("volume") or 0.0)
-        if shape.get("valid") is False:
-            invalid.append(name)
-    return solids, volume, invalid
+def solid_health(state):
+    """Total solids, volume, and validity through ``DocumentState``."""
+    from .document_inspector import as_document_state
+    return as_document_state(state).health()
 
 
 def regression_issues(best, after):
@@ -498,8 +489,8 @@ def regression_issues(best, after):
     """
     if not best:
         return []
-    best_solids, best_volume, _ = _solid_health(best)
-    solids, volume, invalid = _solid_health(after)
+    best_solids, best_volume, _ = solid_health(best)
+    solids, volume, invalid = solid_health(after)
     issues = []
     if best_solids and solids < best_solids:
         issues.append(

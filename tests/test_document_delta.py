@@ -1,4 +1,6 @@
-from freecad.journeyman.document_inspector import DocumentDelta, structured_diff
+from freecad.journeyman.document_inspector import (
+    DocumentDelta, DocumentState, as_document_state, structured_diff,
+)
 
 
 def _state(objects):
@@ -62,3 +64,20 @@ def test_structured_labels_each_change_kind():
     assert "Created: N" in out
     assert "Deleted: D" in out
     assert "Modified: A" in out
+
+
+def test_document_state_owns_delta_and_health_derivations():
+    before = DocumentState(_state({"Old": {"type": "Part::Feature"}}))
+    after = DocumentState(_state({"Pad": {
+        "type": "PartDesign::Pad",
+        "shape": {"solids": 1, "volume": 42.5, "valid": True},
+    }}))
+    assert after.delta_from(before).changed_names == ["Pad"]
+    assert after.health() == (1, 42.5, [])
+    assert "Created: Pad" in after.structured_diff_from(before)
+
+
+def test_as_document_state_preserves_instances_and_adapts_mappings():
+    state = DocumentState(_state({}))
+    assert as_document_state(state) is state
+    assert isinstance(as_document_state(_state({})), DocumentState)

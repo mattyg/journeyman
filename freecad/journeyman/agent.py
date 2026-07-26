@@ -786,7 +786,7 @@ class Agent:
                 # A step that succeeded can still have made the model worse.
                 workflow_warnings.extend(
                     cad_workflow.regression_issues(turn.best_state, after))
-                solids, _volume, invalid = cad_workflow._solid_health(after)
+                solids, _volume, invalid = cad_workflow.solid_health(after)
                 if not invalid and solids >= turn.best_solids:
                     turn.best_state, turn.best_solids = after, solids
                 # Say plainly when a valid solid exists, so verification does
