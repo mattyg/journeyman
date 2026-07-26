@@ -4,13 +4,13 @@ import binascii
 import math
 import struct
 import zlib
-from .transcript import is_internal_object
+from ..transcript import is_internal_object
 
 
 def changed_object_names(before, after):
     # Thin shim over the single change derivation in document_inspector so
     # rendering and the model feedback agree on what "changed" means.
-    from .document_inspector import DocumentDelta
+    from ..document import DocumentDelta
     return DocumentDelta(before, after).changed_names
 
 

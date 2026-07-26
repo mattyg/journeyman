@@ -35,7 +35,7 @@ def _register_preference_page():
     and CAM workbenches do) so the page can populate its Model dropdown from a
     live provider fetch — something a static .ui page cannot do."""
     try:
-        from freecad.journeyman.preferences import JourneymanPreferencesPage
+        from freecad.journeyman.config.preferences import JourneymanPreferencesPage
         Gui.addPreferencePage(JourneymanPreferencesPage, "Journeyman")
     except Exception as exc:  # never let a UI-registration hiccup abort startup
         FreeCAD.Console.PrintWarning(

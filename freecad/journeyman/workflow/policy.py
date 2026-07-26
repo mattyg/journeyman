@@ -194,7 +194,7 @@ def fidelity_feature_issues(previous, proposed):
 
 def review_step(before, after, proposal, settings):
     """Inspect a before/after document state for workflow-specific warnings."""
-    from ..document_inspector import DocumentDelta
+    from ..document import DocumentDelta
     delta = DocumentDelta(before, after)
     new = delta.new
     changed = set(delta.changed_names)
@@ -243,7 +243,7 @@ def review_step(before, after, proposal, settings):
 
 def part_design_issues(before, after):
     """Return hard violations of the native Part Design construction policy."""
-    from ..document_inspector import DocumentDelta
+    from ..document import DocumentDelta
     delta = DocumentDelta(before, after)
     if not delta.changed_names:
         return []
@@ -474,7 +474,7 @@ def buildable_summary(state):
 
 def solid_health(state):
     """Total solids, volume, and validity through ``DocumentState``."""
-    from ..document_inspector import as_document_state
+    from ..document.state import as_document_state
     return as_document_state(state).health()
 
 

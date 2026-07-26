@@ -210,7 +210,7 @@ def run(app, script: str, validate=False, rollback_on_failure=False,
         doc.UndoMode = 1
     before_state = None
     if validate:
-        from . import document_inspector
+        from . import state as document_inspector
         before_state = document_inspector.document_state(app, rich=True)
     doc.openTransaction("Journeyman")
     stdout = io.StringIO()

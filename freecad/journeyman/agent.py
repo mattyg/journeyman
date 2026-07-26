@@ -672,7 +672,7 @@ class Agent:
             if result.ok and validation_ok:
                 turn.executed_steps += 1
                 turn.retries = 0
-                from .view_capture import changed_object_names
+                from .visual.capture import changed_object_names
                 changed_names = changed_object_names(before, after)
                 feedback = turn_protocol.execution_body(
                     result, before, after, changed_names, self.settings)

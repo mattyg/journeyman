@@ -12,7 +12,7 @@ pinned with golden tests. The functions are pure: no FreeCAD, no Qt, no client.
 """
 
 from . import policy as cad_workflow
-from .. import document_inspector
+from ..document import state as document_inspector
 
 
 def request(user_message):

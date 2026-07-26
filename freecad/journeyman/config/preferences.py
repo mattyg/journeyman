@@ -32,7 +32,7 @@ from PySide import QtCore, QtGui
 import FreeCAD
 
 from . import settings as st
-from . import llm_client
+from .. import llm_client
 
 
 class _FetchBridge(QtCore.QObject):

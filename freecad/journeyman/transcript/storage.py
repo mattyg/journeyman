@@ -3,7 +3,7 @@ import base64
 import json
 import zlib
 
-from ..script_executor import ExecResult
+from ..document import ExecResult
 
 
 OBJECT_NAME = "JourneymanChatHistory"

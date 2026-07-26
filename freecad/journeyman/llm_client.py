@@ -20,7 +20,7 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass
 
-from .settings import Settings
+from .config import Settings
 
 # Spliced into SYSTEM_PROMPT and removed again when on_demand_render is off.
 # Named so the two uses cannot drift apart the way a duplicated literal would.

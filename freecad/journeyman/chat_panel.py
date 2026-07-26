@@ -7,21 +7,24 @@ from PySide import QtGui, QtCore
 import FreeCAD
 import FreeCADGui as Gui
 
-from . import document_inspector, script_executor, llm_client, view_capture
+from . import llm_client
+from .document import execution as script_executor
+from .document import state as document_inspector
 from .transcript import storage as history_store
 from .transcript import export as transcript_export
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
-from .document_session import (
+from .document.session import (
     DocumentSession, PinnedDocumentApp, run_with_document,
 )
-from .image_processing import reference_triptych
+from .visual.reference import reference_triptych
+from .visual import capture as view_capture
 from .transcript.markup import (
     to_html as markdown_to_html,
     wrappable_escape as _wrappable_escape,
     wrapped_pre as _wrapped_pre,
 )
-from .settings import load_settings, model_display_name, PARAM_PATH
+from .config.settings import load_settings, model_display_name, PARAM_PATH
 
 class _Client:
     def complete(self, messages, settings):
@@ -337,7 +340,7 @@ class JourneymanDockWidget(QtGui.QDockWidget):
                     lambda: on_document(lambda: script_executor.undo(app)))
 
         def capture_views(changed_names, strategy, max_isolated, **options):
-            return main.run(lambda: on_document(lambda: view_capture.capture(
+            return main.run(lambda: on_document(lambda: view_capture(
                 FreeCAD, changed_names, strategy, max_isolated, **options)))
 
         return Agent(client=_Client(), inspector=inspector,
