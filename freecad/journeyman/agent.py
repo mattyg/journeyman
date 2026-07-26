@@ -1,6 +1,8 @@
 # freecad/journeyman/agent.py
 import re
 
+from .workflow_engine import TurnState as _Turn, WorkflowEngine
+
 
 class AgentCancelled(Exception):
     """Raised when the user cancels an in-progress agent turn."""
@@ -149,55 +151,6 @@ def _model_history(messages):
     return compact
 
 
-class _Turn:
-    """Mutable per-turn state threaded through the proposal handlers.
-
-    Bundles what used to be a handful of loose locals in ``Agent.send`` so each
-    handler can read and advance them without a long parameter list. The
-    handlers own the retry policy for their own proposal kind; the dispatch loop
-    only routes.
-    """
-
-    def __init__(self):
-        self.executed_steps = 0
-        self.retries = 0
-        self.planning_retries = 0
-        self.completion_retries = 0
-        self.question_retries = 0
-        self.assumption_retries = 0
-        self.assumptions_accepted = False
-        self.assumption_clarification = False
-        self.assumption_questions = 0
-        self.fidelity_retries = 0
-        self.fidelity_clarification = False
-        self.fidelity_questions = 0
-        self.part_design_retries = 0
-        # Consecutive failures of the same plan step with the same error, so a
-        # feature that will not build is abandoned rather than retried
-        # cosmetically. See _feature_signature.
-        self.feature_signature = None
-        self.feature_failures = 0
-        # The ledger-first turn is injected at most once per turn, so a model
-        # that declines to supply a ledger meets the normal gate, not a loop.
-        self.ledger_first_requested = False
-        self.multi_feature_retries = 0
-        self.noop_retries = 0
-        # Identical gate rejections in a row. A gate repeating itself verbatim
-        # is a deadlock, not correction — see Agent._reject.
-        self.last_rejection = None
-        self.repeated_rejections = 0
-        # Healthiest document state reached this turn. Every other guard
-        # watches for failure; a run can also be destroyed by a sequence of
-        # *successful* steps that each make the model worse.
-        self.best_state = None
-        self.best_solids = 0
-        self.ledger = {
-            "strategy": "", "stage": "analyze", "plan": (),
-            "success_criteria": (), "completed_stages": set(),
-            "completed_steps": 0, "warnings": (),
-        }
-
-
 _EXCEPTION_LINE = re.compile(
     r"^(?:\w+\.)*(\w*(?:Error|Exception|Failure))\b", re.MULTILINE)
 
@@ -339,177 +292,6 @@ class Agent:
         if on_tool_result is not None:
             on_tool_result(
                 "run_freecad_script", getattr(proposal, "intent", ""), feedback)
-
-    def _pre_execution_checks(self, proposal, turn, diagnostic, ledger):
-        """Every pre-execution objection to a proposal, collected in one pass.
-
-        Returns ``(blocking, advisories, abort)``. Only three rules block: they
-        are the ones where letting the step run causes damage that is expensive
-        to undo. Everything else is bookkeeping — the document is transactional
-        and the completion gates still enforce it once, at the end, so blocking
-        a whole script over metadata only costs a turn and produces nothing.
-
-        ``abort`` is a summary string when a rule exhausted its retry budget.
-        Ordering matters: the ledger merges mutate ``turn.ledger`` and the
-        clarification check depends on a successful merge, so the sequence here
-        matches the order the rules were originally applied.
-        """
-        from . import cad_workflow, turn_protocol
-        blocking, advisories = [], []
-        limit = max(1, self.settings.self_correction_attempts)
-
-        # BLOCKING: an inert block makes the model believe constraints exist
-        # that do not. It corrupts the model's reasoning; nothing downstream
-        # catches that.
-        noop_issues = cad_workflow.noop_block_issues(proposal.script)
-        if noop_issues:
-            turn.noop_retries += 1
-            if turn.noop_retries > limit:
-                return (), (), (
-                    "I couldn't get a script without placeholder blocks: "
-                    + "; ".join(noop_issues) + ".")
-            blocking.append(turn_protocol.placeholder_code(noop_issues))
-        else:
-            turn.noop_retries = 0
-
-        # BLOCKING: Part primitives put non-editable geometry in the document.
-        if not diagnostic and proposal.strategy != "part_design":
-            turn.part_design_retries += 1
-            if turn.part_design_retries > limit:
-                return (), (), (
-                    "I couldn't produce a native Part Design proposal.")
-            blocking.append(turn_protocol.part_design_required())
-
-        # Advisory: a plan is metadata; a missing one cannot damage the model.
-        if self.settings.structured_cad_planning and not diagnostic:
-            issues = cad_workflow.proposal_issues(proposal)
-            if issues:
-                advisories.extend(issues)
-            else:
-                ledger.update({
-                    "strategy": proposal.strategy, "stage": proposal.stage,
-                    "plan": proposal.plan, "plan_step": proposal.plan_step,
-                    "success_criteria": proposal.success_criteria,
-                })
-        if not (self.settings.structured_cad_planning and not diagnostic):
-            # Other workflow switches are independently configurable, so retain
-            # any optional metadata even when plan enforcement is off.
-            for key, value in (
-                    ("strategy", proposal.strategy), ("stage", proposal.stage),
-                    ("plan", proposal.plan),
-                    ("success_criteria", proposal.success_criteria)):
-                if value:
-                    ledger[key] = value
-
-        if self.settings.assumption_ledger and not diagnostic:
-            abort = self._assumption_checks(
-                proposal, turn, blocking, advisories, limit)
-            if abort:
-                return (), (), abort
-        elif (self.settings.assumption_ledger
-              and proposal.assumptions is not None):
-            abort = self._assumption_update_checks(
-                proposal, turn, advisories, limit)
-            if abort:
-                return (), (), abort
-
-        # Advisory pre-execution: the *completion* fidelity gate is what
-        # actually prevents silent omission, and it fires when the model claims
-        # to be done — which is when omission matters.
-        if self.settings.fidelity_target == "replica" and not diagnostic:
-            features, issues = cad_workflow.fidelity_feature_issues(
-                turn.ledger.get("observed_features"),
-                proposal.observed_features)
-            if not issues:
-                if any(row["status"] == "user_approved_omission"
-                       for row in features) and turn.fidelity_questions == 0:
-                    turn.fidelity_clarification = True
-                    issues.append(
-                        "ask the user before omitting an observed feature")
-                if any(row["status"] == "blocked" for row in features):
-                    issues.append(
-                        "change construction strategy to implement blocked "
-                        "features; difficulty is not permission to omit them")
-            if issues:
-                advisories.extend(issues)
-            if features:
-                turn.ledger["observed_features"] = features
-                turn.fidelity_clarification = False
-
-        # Advisory: batching hurts diagnosis, not the document.
-        if self.settings.one_feature_per_step and not diagnostic:
-            advisories.extend(
-                cad_workflow.multi_feature_issues(proposal.script))
-        return tuple(blocking), tuple(advisories), None
-
-    def _assumption_checks(self, proposal, turn, blocking, advisories, limit):
-        """Ledger validation for a turn that has not yet accepted assumptions."""
-        from . import cad_workflow, turn_protocol
-        if turn.assumptions_accepted:
-            # Assumptions were accepted earlier this turn; a later step may
-            # still update them, and those updates still need checking.
-            if proposal.assumptions is not None:
-                return self._assumption_update_checks(
-                    proposal, turn, advisories, limit)
-            return None
-        # Stage 2: ask for assumptions before the first build. Advisory — the
-        # request is what matters, and refusing to run without one costs a turn.
-        if (not turn.ledger_first_requested
-                and turn.ledger.get("assumptions") is None
-                and proposal.assumptions is None):
-            turn.ledger_first_requested = True
-            advisories.append(
-                "provide an assumption ledger with this step: every numeric "
-                "value not given in the request, with source, confidence, "
-                "consequence and status")
-            return None
-        issues = cad_workflow.assumption_ledger_missing(proposal, turn)
-        if not issues and turn.ledger.get("assumptions") is not None:
-            advisories.extend(cad_workflow.relabelled_assumptions(
-                turn.ledger["assumptions"], proposal.assumptions))
-            merged, merge_issues = cad_workflow.merge_assumptions(
-                turn.ledger["assumptions"], proposal.assumptions)
-            issues.extend(merge_issues)
-        else:
-            merged = cad_workflow.sort_assumptions(
-                dict(row) for row in (proposal.assumptions or ()))
-        if issues:
-            # Advisory: the tool schema already enforces row shape, so these
-            # are rare, and a malformed row cannot damage the document.
-            advisories.extend(issues)
-        turn.ledger["assumptions"] = merged
-        # BLOCKING: a low-confidence, high-consequence value gets baked into
-        # every downstream feature. One line now versus a tree rebuild later.
-        blocking_rows = cad_workflow.blocking_assumptions(merged)
-        if blocking_rows:
-            turn.assumption_clarification = True
-            blocking.append(
-                turn_protocol.assumption_clarification_required(
-                    [row["id"] for row in blocking_rows]))
-            return None
-        if turn.assumption_clarification and turn.assumption_questions == 0:
-            blocking.append(
-                turn_protocol.assumption_clarification_required())
-            return None
-        turn.assumptions_accepted = True
-        turn.assumption_clarification = False
-        turn.assumption_retries = 0
-        return None
-
-    def _assumption_update_checks(self, proposal, turn, advisories, limit):
-        """Ledger updates after assumptions were accepted."""
-        from . import cad_workflow
-        issues = cad_workflow.assumption_ledger_missing(
-            proposal, type("_Pending", (), {"assumptions_accepted": False})())
-        advisories.extend(cad_workflow.relabelled_assumptions(
-            turn.ledger.get("assumptions", ()), proposal.assumptions))
-        merged, merge_issues = cad_workflow.merge_assumptions(
-            turn.ledger.get("assumptions", ()), proposal.assumptions)
-        issues.extend(merge_issues)
-        if issues:
-            advisories.extend(issues)
-        turn.ledger["assumptions"] = merged
-        return None
 
     def _handle_render(self, proposal, turn, on_tool_result=None):
         """On-demand rendering: capture views now and feed them back.
@@ -743,8 +525,9 @@ class Agent:
         else:
             content = request_text
         self.messages.append({"role": "user", "content": content})
-        turn = _Turn()
-        ledger = turn.ledger  # same dict; a short alias for the execution block
+        workflow = WorkflowEngine(self.settings)
+        turn = workflow.state
+        ledger = workflow.ledger  # same dict; a short alias for execution
         while True:
             check_cancelled()
             # Build the request once and hand the *same* list to the recorder
@@ -882,8 +665,8 @@ class Agent:
             # blocking it would leave the model guessing after a failure.
             diagnostic = cad_workflow.is_read_only_script(proposal.script)
 
-            blocking, step_advisories, abort = self._pre_execution_checks(
-                proposal, turn, diagnostic, ledger)
+            blocking, step_advisories, abort = workflow.pre_execution_checks(
+                proposal, diagnostic)
             if abort:
                 self.messages.append({"role": "assistant", "content": abort})
                 return abort
