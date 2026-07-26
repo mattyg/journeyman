@@ -1,0 +1,14 @@
+{
+  "id": "disc-spring-create-text",
+  "kind": "create",
+  "prompt": "A disc spring, also known as a Belleville washer, is a conical-shaped mechanical component that provides a spring force when subjected to a load. It typically consists of a circular ring with a conical profile, which allows it to compress and expand under load.\n\nKey parameters: outside_diameter and inner_diameter define the disc's radial extent; overall_height is the full vertical extent of the cross-section's bounding box; thickness is the perpendicular thickness of the disc material; cone_height is the nominal vertical rise of the slanted-material centerline (= overall_height - thickness) and represents the spring's free travel before flattening.\n\nKey parameters:\n- outside_diameter=8.0mm\n- inner_diameter=4.2mm\n- overall_height=0.6mm\n- thickness=0.4mm\n- cone_height=0.2mm",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd"
+  },
+  "judge": {
+    "variant": "create-text",
+    "fidelity": "functional-analogue",
+    "dataset_id": "14da78600e",
+    "notes": "Full text spec, no image; grade spec adherence only."
+  }
+}

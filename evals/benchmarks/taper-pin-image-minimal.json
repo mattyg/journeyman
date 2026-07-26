@@ -1,0 +1,18 @@
+{
+  "id": "taper-pin-image-minimal",
+  "kind": "create",
+  "prompt": "Model the part shown in the attached image. Make it parametric.",
+  "images": [
+    "refs/taper-pin.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "image-minimal",
+    "fidelity": "replica",
+    "dataset_id": "163672a65f",
+    "notes": "Only the image was given \u2014 no dimensions. Grade proportions and feature match, plus whether scale assumptions were surfaced; never exact sizes."
+  }
+}

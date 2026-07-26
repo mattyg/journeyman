@@ -1,0 +1,20 @@
+{
+  "id": "taper-pin-modify-param",
+  "kind": "modify",
+  "prompt": "Could you stretch this pin out to 5mm long? The one I have doesn't reach far enough through the second plate.",
+  "start_document": "refs/taper-pin.FCStd",
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "163672a65f",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "length",
+      "old": 4.0,
+      "new": 5.0,
+      "unit": "mm"
+    }
+  }
+}

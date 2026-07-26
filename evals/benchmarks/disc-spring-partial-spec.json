@@ -1,0 +1,20 @@
+{
+  "id": "disc-spring-partial-spec",
+  "kind": "create",
+  "prompt": "I need a Belleville washer modeled up. The center hole should be 4.2mm across, the material is 0.4mm thick, and it needs 0.2mm of cone rise so it has a bit of travel before it flattens out. Can you put that together for me?",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "14da78600e",
+    "withheld": [
+      "outside_diameter = 8mm",
+      "overall_height = 0.6mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

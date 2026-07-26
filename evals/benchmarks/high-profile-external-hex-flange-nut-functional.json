@@ -1,0 +1,15 @@
+{
+  "id": "high-profile-external-hex-flange-nut-functional",
+  "kind": "create",
+  "prompt": "I'm bolting a steel bracket onto a machine frame and the bracket has a slightly oversized slot, so a normal nut keeps digging in and pulling through. I need a fastener that threads onto a stud and spreads the clamping load over a wider area of the bracket surface so I don't need a separate washer. It has to be turned with a standard open-end wrench, and it needs plenty of grip length because the stud sticks out quite far and vibration keeps loosening things. Can you design something that works for that?",
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "067a9a8726",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

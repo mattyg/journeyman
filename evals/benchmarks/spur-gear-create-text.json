@@ -1,0 +1,14 @@
+{
+  "id": "spur-gear-create-text",
+  "kind": "create",
+  "prompt": "A spur gear consists of a cylindrical gear body with external involute teeth, a central hub, and a round bore for mounting on a shaft.\n\nThe toothed gear body is defined by number_of_teeth, gear_module, pressure_angle, face_width, pitch_diameter, outer_diameter, base_diameter, root_diameter, addendum, dedendum, whole_depth, clearance, circular_pitch, and tooth_thickness.\n\nThe hub is integrated concentrically with the gear body and is governed by hub_diameter, hub_width, and overall_width.\n\nThe central bore passes through the gear axis and is characterized by shaft_diameter.\n\nKey parameters:\n- pressure_angle = 20 degrees\n- gear_module = 1.5 mm\n- number_of_teeth = 80\n- pitch_diameter = 120 mm\n- outer_diameter = 123 mm\n- face_width = 15 mm\n- hub_diameter = 55 mm\n- hub_width = 10 mm\n- shaft_diameter = 12 mm\n- overall_width = 25 mm\n- addendum = gear_module = 1.5 = 1.5 mm  # ISO 54 / DIN 867\n- dedendum = 1.25 * gear_module = 1.25 * 1.5 = 1.875 mm  # ISO 54 / DIN 867\n- whole_depth = addendum + dedendum = 1.5 + 1.875 = 3.375 mm  # ISO 54 / DIN 867\n- clearance = dedendum - addendum = 1.875 - 1.5 = 0.375 mm  # ISO 54 / DIN 867\n- base_diameter = pitch_diameter * cos(pressure_angle) = 120 * cos(20) = 112.763 mm  # ISO 21771\n- circular_pitch = pi * gear_module = pi * 1.5 = 4.712 mm  # ISO 54\n- tooth_thickness = circular_pitch / 2 = 4.712 / 2 = 2.356 mm  # ISO 54\n- root_diameter = pitch_diameter - (2 * dedendum) = 120 - (2 * 1.875) = 116.25 mm  # ISO 54 / DIN 867",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd"
+  },
+  "judge": {
+    "variant": "create-text",
+    "fidelity": "functional-analogue",
+    "dataset_id": "1db55e40f2",
+    "notes": "Full text spec, no image; grade spec adherence only."
+  }
+}

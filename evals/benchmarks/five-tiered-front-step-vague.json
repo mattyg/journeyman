@@ -1,0 +1,14 @@
+{
+  "id": "five-tiered-front-step-vague",
+  "kind": "create",
+  "prompt": "Can you model a small set of concrete front steps for my house entry? Something around 1200mm wide, just a simple solid stair block, nothing fancy.",
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "0f27beedee",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

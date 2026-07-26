@@ -1,0 +1,20 @@
+{
+  "id": "standard-external-hex-coupling-nut-modify-param",
+  "kind": "modify",
+  "prompt": "Can you stretch this nut out to 37.5mm long? The current one doesn't give me enough thread engagement on both rods.",
+  "start_document": "refs/standard-external-hex-coupling-nut.FCStd",
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "overall_length",
+      "old": 30.0,
+      "new": 37.5,
+      "unit": "mm"
+    }
+  }
+}

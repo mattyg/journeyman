@@ -1,0 +1,23 @@
+{
+  "id": "water-cup-modify-img",
+  "kind": "modify",
+  "prompt": "I've attached a screenshot of the cup as it is right now. The wall you can see in the picture \u2014 the shell between the outside surface and the hollow inside \u2014 I need that a bit thicker, go to 2.5mm instead of what it is now.",
+  "images": [
+    "refs/water-cup.png"
+  ],
+  "start_document": "refs/water-cup.FCStd",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "1b9f95801c",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "cup_thickness",
+      "old": 2.0,
+      "new": 2.5,
+      "unit": "mm"
+    }
+  }
+}

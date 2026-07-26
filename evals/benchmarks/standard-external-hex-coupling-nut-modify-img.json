@@ -1,0 +1,23 @@
+{
+  "id": "standard-external-hex-coupling-nut-modify-img",
+  "kind": "modify",
+  "prompt": "The picture attached is how the part looks right now. See how short the hex body is between the two end faces in the image? I need that dimension bigger \u2014 take it to 37.5mm please.",
+  "images": [
+    "refs/standard-external-hex-coupling-nut.png"
+  ],
+  "start_document": "refs/standard-external-hex-coupling-nut.FCStd",
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "overall_length",
+      "old": 30.0,
+      "new": 37.5,
+      "unit": "mm"
+    }
+  }
+}

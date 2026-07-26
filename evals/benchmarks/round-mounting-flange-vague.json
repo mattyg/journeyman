@@ -1,0 +1,14 @@
+{
+  "id": "round-mounting-flange-vague",
+  "kind": "create",
+  "prompt": "Can you make me a simple round bolt-on flange, roughly 69.454mm across the outside? Just the usual thing \u2014 a hole in the middle for a shaft and a few bolt holes around it so I can screw it to a housing face.",
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

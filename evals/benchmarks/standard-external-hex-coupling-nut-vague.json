@@ -1,0 +1,14 @@
+{
+  "id": "standard-external-hex-coupling-nut-vague",
+  "kind": "create",
+  "prompt": "I need a long hex coupling nut, the kind you use to join two threaded rods end to end. Something around 30mm long. Nothing fancy, just the hex body with a hole through it.",
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

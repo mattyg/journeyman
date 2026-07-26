@@ -1,0 +1,17 @@
+{
+  "id": "standard-external-hex-coupling-nut-create-img",
+  "kind": "create",
+  "prompt": "A standard external-hex coupling nut consists of an elongated hexagonal prismatic body with a plain cylindrical through hole running along the central axis.\n\nThe hex body size and overall length are governed by hex_width_across_flats and overall_length.\n\nThe axial clearance passage is defined by through_hole_diameter and extends through the full length set by overall_length.\n\nKey parameters:\n- overall_length = 30mm\n- hex_width_across_flats = 17mm\n- through_hole_diameter = 10mm",
+  "images": [
+    "refs/standard-external-hex-coupling-nut.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd"
+  },
+  "judge": {
+    "variant": "create-img",
+    "fidelity": "replica",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Full spec plus reference render of the ground truth; grade silhouette and feature match."
+  }
+}

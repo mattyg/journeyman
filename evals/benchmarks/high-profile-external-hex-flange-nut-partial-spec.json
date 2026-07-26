@@ -1,0 +1,20 @@
+{
+  "id": "high-profile-external-hex-flange-nut-partial-spec",
+  "kind": "create",
+  "prompt": "I need a hex flange nut modeled \u2014 the tall kind with the built-in washer skirt at the bottom. Total height should be 27mm, the flange is 34mm across, and the hex measures 27mm across the flats. Can you put that together for me?",
+  "images": [],
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd",
+    "bbox_tol": 0.25,
+    "volume_tol": 0.35
+  },
+  "judge": {
+    "variant": "partial-spec",
+    "dataset_id": "067a9a8726",
+    "withheld": [
+      "through_hole_diameter = 18mm",
+      "flange_thickness = 5mm"
+    ],
+    "notes": "These parameters were deliberately withheld from the prompt. Grade whether the agent flagged assumptions or asked about them \u2014 never whether it guessed the exact values."
+  }
+}

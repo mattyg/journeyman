@@ -1,0 +1,20 @@
+{
+  "id": "spur-gear-modify-param",
+  "kind": "modify",
+  "prompt": "Can you make the hub a bit longer on this gear? I need it to stick out to 12.5 mm instead of 10 so my set screw clears the bearing face.",
+  "start_document": "refs/spur-gear.FCStd",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "1db55e40f2",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "hub_width",
+      "old": 10.0,
+      "new": 12.5,
+      "unit": "mm"
+    }
+  }
+}

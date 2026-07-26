@@ -1,0 +1,18 @@
+{
+  "id": "standard-external-hex-coupling-nut-image-minimal",
+  "kind": "create",
+  "prompt": "Model the part shown in the attached image. Make it parametric.",
+  "images": [
+    "refs/standard-external-hex-coupling-nut.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/standard-external-hex-coupling-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "image-minimal",
+    "fidelity": "replica",
+    "dataset_id": "0e9bcbd4f4",
+    "notes": "Only the image was given \u2014 no dimensions. Grade proportions and feature match, plus whether scale assumptions were surfaced; never exact sizes."
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "id": "round-mounting-flange-modify-underspec",
+  "kind": "modify",
+  "prompt": "This flange feels a bit flimsy for what I'm doing. Can you beef it up so it's sturdier?",
+  "start_document": "refs/round-mounting-flange.FCStd",
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

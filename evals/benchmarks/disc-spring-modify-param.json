@@ -1,0 +1,20 @@
+{
+  "id": "disc-spring-modify-param",
+  "kind": "modify",
+  "prompt": "Could you open this up a bit on the outside? I need the outer edge to go out to 10mm so it seats properly in my counterbore.",
+  "start_document": "refs/disc-spring.FCStd",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd"
+  },
+  "judge": {
+    "variant": "modify-param",
+    "dataset_id": "14da78600e",
+    "notes": "Grade whether exactly this change was made parametrically with everything else preserved.",
+    "target": {
+      "parameter": "outside_diameter",
+      "old": 8.0,
+      "new": 10.0,
+      "unit": "mm"
+    }
+  }
+}

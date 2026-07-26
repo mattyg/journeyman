@@ -1,0 +1,14 @@
+{
+  "id": "water-cup-modify-underspec",
+  "kind": "modify",
+  "prompt": "This cup feels a bit too fragile for everyday use \u2014 can you beef it up a little so it holds up better?",
+  "start_document": "refs/water-cup.FCStd",
+  "expect": {
+    "ground_truth": "refs/water-cup.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "1b9f95801c",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

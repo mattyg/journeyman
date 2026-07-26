@@ -1,0 +1,15 @@
+{
+  "id": "spur-gear-functional",
+  "kind": "create",
+  "prompt": "I've got a slow-speed rotary indexing table driven by a small motor and I need a big reduction ratio in one stage, so I need the driven part of that pair. It has to mesh with a small mating driver on a parallel axis, transmit maybe a couple of Nm smoothly and quietly with minimal backlash, and mount onto a 12 mm ground shaft with enough material around the shaft that I can drill and tap for a set screw without it flexing. It sits in a shallow housing so it can't be very thick overall. Can you design that for me?",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "1db55e40f2",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

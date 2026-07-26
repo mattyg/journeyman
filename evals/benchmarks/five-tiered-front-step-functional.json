@@ -1,0 +1,15 @@
+{
+  "id": "five-tiered-front-step-functional",
+  "kind": "create",
+  "prompt": "The finished floor of my front porch sits noticeably above the walkway, and right now people have to scramble up. I need a solid precast unit that lets someone walk comfortably from the path up to the door with normal, even strides, wide enough that two people can pass or one person can carry groceries up without feeling pinched. It'll sit outside in weather and get sat on occasionally, so it should be one solid piece I can cast and set in place.",
+  "expect": {
+    "ground_truth": "refs/five-tiered-front-step.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "functional",
+    "fidelity": "functional-analogue",
+    "dataset_id": "0f27beedee",
+    "notes": "Only the use case was described. Grade whether the design would serve that use; any geometry that works is correct."
+  }
+}

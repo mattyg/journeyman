@@ -1,0 +1,23 @@
+{
+  "id": "spur-gear-modify-img",
+  "kind": "modify",
+  "prompt": "The picture attached is how the gear looks right now. See that raised boss around the bore, the collar sticking out from the flat face? I need that to project a bit further \u2014 bump it up to 12.5 mm long. Everything else stays as is.",
+  "images": [
+    "refs/spur-gear.png"
+  ],
+  "start_document": "refs/spur-gear.FCStd",
+  "expect": {
+    "ground_truth": "refs/spur-gear.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "1db55e40f2",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "hub_width",
+      "old": 10.0,
+      "new": 12.5,
+      "unit": "mm"
+    }
+  }
+}

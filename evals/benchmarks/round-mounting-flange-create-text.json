@@ -1,0 +1,14 @@
+{
+  "id": "round-mounting-flange-create-text",
+  "kind": "create",
+  "prompt": "A round mounting flange consists of a circular flange body with a central plain through hole and a set of bolt holes arranged on a bolt circle.\n\nThe flange body is defined by outer_diameter and flange_thickness, with the central through hole defined by inner_diameter.\n\nThe bolt pattern consists of number_bolt_holes through holes, each defined by bolt_hole_diameter, positioned evenly around pitch_circle_diameter.\n\nKey parameters:\n- inner_diameter = 34.925 mm\n- outer_diameter = 69.454 mm\n- flange_thickness = 13.097 mm\n- pitch_circle_diameter = 56.356 mm\n- bolt_hole_diameter = 6.747 mm\n- number_bolt_holes = 4",
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd"
+  },
+  "judge": {
+    "variant": "create-text",
+    "fidelity": "functional-analogue",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "Full text spec, no image; grade spec adherence only."
+  }
+}

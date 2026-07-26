@@ -1,0 +1,23 @@
+{
+  "id": "disc-spring-modify-img",
+  "kind": "modify",
+  "prompt": "Here's a screenshot of the spring as it is right now. See that outer rim in the picture, the outside edge of the cone? I need that bigger \u2014 take it out to 10mm across, please. Everything else stays as is.",
+  "images": [
+    "refs/disc-spring.png"
+  ],
+  "start_document": "refs/disc-spring.FCStd",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "14da78600e",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "outside_diameter",
+      "old": 8.0,
+      "new": 10.0,
+      "unit": "mm"
+    }
+  }
+}

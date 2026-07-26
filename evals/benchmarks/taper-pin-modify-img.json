@@ -1,0 +1,23 @@
+{
+  "id": "taper-pin-modify-img",
+  "kind": "modify",
+  "prompt": "The picture attached is my pin as it stands right now. Measuring from the narrow tip to the wide end in that image, I need that overall dimension to be 5mm instead of what it is now. Everything else can stay the same.",
+  "images": [
+    "refs/taper-pin.png"
+  ],
+  "start_document": "refs/taper-pin.FCStd",
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "163672a65f",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "length",
+      "old": 4.0,
+      "new": 5.0,
+      "unit": "mm"
+    }
+  }
+}

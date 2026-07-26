@@ -1,0 +1,14 @@
+{
+  "id": "high-profile-external-hex-flange-nut-vague",
+  "kind": "create",
+  "prompt": "Can you model me a tall hex nut with a flange built into the base? Something around 34mm across the flange. It's for clamping down a bracket without needing a separate washer.",
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "vague",
+    "dataset_id": "067a9a8726",
+    "notes": "Casual request with at most a rough size. Grade process quality: sensible defaults, surfaced assumptions, plausible proportions. The ground truth is one valid answer, not the required one."
+  }
+}

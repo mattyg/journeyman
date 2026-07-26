@@ -1,0 +1,18 @@
+{
+  "id": "high-profile-external-hex-flange-nut-image-minimal",
+  "kind": "create",
+  "prompt": "Model the part shown in the attached image. Make it parametric.",
+  "images": [
+    "refs/high-profile-external-hex-flange-nut.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd",
+    "measure": false
+  },
+  "judge": {
+    "variant": "image-minimal",
+    "fidelity": "replica",
+    "dataset_id": "067a9a8726",
+    "notes": "Only the image was given \u2014 no dimensions. Grade proportions and feature match, plus whether scale assumptions were surfaced; never exact sizes."
+  }
+}

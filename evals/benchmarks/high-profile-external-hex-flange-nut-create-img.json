@@ -1,0 +1,17 @@
+{
+  "id": "high-profile-external-hex-flange-nut-create-img",
+  "kind": "create",
+  "prompt": "A high-profile external-hex flange nut consists of a central plain through-hole, an external hex drive body, and an integrated circular flange at one end, forming a stepped nut profile.\n\nThe plain through-hole is defined by through_hole_diameter and runs axially through the full nut height set by overall_height.\n\nThe external hex drive is specified by drive_style, with its width controlled by hub_width and its axial extent controlled by hex_head_height.\n\nThe integrated flange is a coaxial circular skirt at the base of the nut, defined by flange_diameter and flange_thickness, and merges into the hex body to create the overall high-profile form set by nut_profile.\n\nKey parameters:\n- drive_style = external_hex\n- nut_profile = high\n- through_hole_diameter = 18.0 mm\n- overall_height = 27.0 mm\n- flange_diameter = 34.0 mm\n- flange_thickness = 5.0 mm\n- hub_width = 27.0 mm\n- hex_head_height = overall_height - flange_thickness = 27.0mm - 5.0mm = 22.0 mm  # DIN 6331",
+  "images": [
+    "refs/high-profile-external-hex-flange-nut.png"
+  ],
+  "expect": {
+    "ground_truth": "refs/high-profile-external-hex-flange-nut.FCStd"
+  },
+  "judge": {
+    "variant": "create-img",
+    "fidelity": "replica",
+    "dataset_id": "067a9a8726",
+    "notes": "Full spec plus reference render of the ground truth; grade silhouette and feature match."
+  }
+}

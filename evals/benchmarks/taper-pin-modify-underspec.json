@@ -1,0 +1,14 @@
+{
+  "id": "taper-pin-modify-underspec",
+  "kind": "modify",
+  "prompt": "This pin feels a bit flimsy to me \u2014 can you beef it up so it holds up better in use?",
+  "start_document": "refs/taper-pin.FCStd",
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "163672a65f",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

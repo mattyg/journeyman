@@ -1,0 +1,14 @@
+{
+  "id": "disc-spring-modify-underspec",
+  "kind": "modify",
+  "prompt": "This feels too flimsy for the load I'm putting on it \u2014 can you beef it up so it's sturdier?",
+  "start_document": "refs/disc-spring.FCStd",
+  "expect": {
+    "ground_truth": "refs/disc-spring.FCStd"
+  },
+  "judge": {
+    "variant": "modify-underspec",
+    "dataset_id": "14da78600e",
+    "notes": "Deliberately vague strengthening request. Grade whether the agent asked or stated a concrete interpretation before editing, and preserved design intent."
+  }
+}

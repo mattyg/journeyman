@@ -1,0 +1,23 @@
+{
+  "id": "round-mounting-flange-modify-img",
+  "kind": "modify",
+  "prompt": "The picture attached is how the flange looks right now. See that outer rim edge running all the way around the disc in the image? I need that to go out further \u2014 take it to 86.82mm across. Everything else stays as is.",
+  "images": [
+    "refs/round-mounting-flange.png"
+  ],
+  "start_document": "refs/round-mounting-flange.FCStd",
+  "expect": {
+    "ground_truth": "refs/round-mounting-flange.FCStd"
+  },
+  "judge": {
+    "variant": "modify-img",
+    "dataset_id": "0fe9d9e3ce",
+    "notes": "The attached image shows the part as it is now, NOT the desired result \u2014 it identifies the feature to change. Grade whether the agent resolved the visual reference to the right feature in the open document, applied the stated change parametrically, and left everything else intact. Treating the image as the target (i.e. making no change) is a failure.",
+    "target": {
+      "parameter": "outer_diameter",
+      "old": 69.454,
+      "new": 86.82,
+      "unit": "mm"
+    }
+  }
+}

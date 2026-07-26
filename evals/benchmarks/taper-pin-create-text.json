@@ -1,0 +1,14 @@
+{
+  "id": "taper-pin-create-text",
+  "kind": "create",
+  "prompt": "A taper pin is a cylindrical pin with a slight taper along its length, typically used for positioning and securing components in mechanical assemblies. It usually has a small end and a large end, with a consistent taper angle.\n\nKey parameters for drawing a taper pin include the small_end_diameter, large_end_diameter, overall_length, and taper_angle. These dimensions ensure the pin fits snugly into a corresponding tapered hole, providing a secure and precise fit.\n\nKey parameters:\n- diameter=0.6mm (small-end diameter; the radius at the start of the taper section after the rounded tip)\n- length=4.0mm\n- rounded_end_height=0.08mm (axial length of the rounded section at each end)\n- taper_ratio=0.02 (1:50 standard taper, slope per unit axial length)",
+  "expect": {
+    "ground_truth": "refs/taper-pin.FCStd"
+  },
+  "judge": {
+    "variant": "create-text",
+    "fidelity": "functional-analogue",
+    "dataset_id": "163672a65f",
+    "notes": "Full text spec, no image; grade spec adherence only."
+  }
+}
