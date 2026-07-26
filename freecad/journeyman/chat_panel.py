@@ -375,6 +375,7 @@ class JourneymanDockWidget(QtGui.QDockWidget):
                         "Journeyman.</p>"),
                 }]
             agent.messages = messages
+            agent.transcript.entries = entries
             state = {
                 "agent": agent, "entries": entries,
                 "reason_seq": 0, "step_seq": 0,
@@ -442,7 +443,8 @@ class JourneymanDockWidget(QtGui.QDockWidget):
             return
         try:
             history_store.save(
-                state["document"], state["agent"].messages, state["entries"])
+                state["document"], state["agent"].messages,
+                state["agent"].transcript.entries)
         except Exception:
             import traceback
             FreeCAD.Console.PrintError(
@@ -1169,6 +1171,7 @@ class JourneymanDockWidget(QtGui.QDockWidget):
             if not agent.messages and not state["entries"]:
                 messages, entries = history_store.load(state["document"])
                 agent.messages = messages
+                agent.transcript.entries = entries
                 state["entries"] = entries
                 self.log.takeWidget()
                 old_page = state["page"]

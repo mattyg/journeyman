@@ -2,6 +2,7 @@
 import re
 
 from .workflow_engine import TurnState as _Turn, WorkflowEngine
+from .transcript import Transcript, model_history as _model_history
 
 
 class AgentCancelled(Exception):
@@ -14,23 +15,6 @@ class AgentCancelled(Exception):
 # EXECUTE -> not a special proposal kind; fall through to run the script.
 LOOP = ("loop",)
 EXECUTE = ("execute",)
-
-
-_INSPECTION_HEADERS = (
-    "[inspection result]\n", "[verify-stage inspection result]\n")
-
-
-def _is_ephemeral_inspection(message):
-    """True for an inspection result, whether tagged this session or not.
-
-    The header fallback covers histories written before the tag existed and
-    reloaded from ``history_store``, so a saved conversation compacts exactly
-    like a live one.
-    """
-    if message.get("ephemeral") == "inspection":
-        return True
-    content = message.get("content")
-    return isinstance(content, str) and content.startswith(_INSPECTION_HEADERS)
 
 
 def _image_blocks(header, images):
@@ -51,104 +35,6 @@ def _image_blocks(header, images):
             "image_url": {"url": "data:image/png;base64," + data},
         })
     return content
-
-
-def _live_inspection_index(messages):
-    """Index of the one inspection still worth its tokens, or ``None``.
-
-    An inspection describes the document at an instant, and the current
-    document is re-injected fresh on every call. So an older inspection is not
-    merely redundant — once a script has changed the document it is *wrong* in
-    exactly the detail the model asked for, and reasoning against it is how a
-    step gets planned around properties that no longer hold. Keep the most
-    recent one, and only while nothing has moved since.
-    """
-    from . import turn_protocol
-    for index in range(len(messages) - 1, -1, -1):
-        message = messages[index]
-        if _is_ephemeral_inspection(message):
-            return index
-        content = message.get("content")
-        if (isinstance(content, str)
-                and turn_protocol.is_document_changing_result(content)):
-            return None
-    return None
-
-
-def _last_document_change_index(messages):
-    """Index of the most recent result that moved the document, or ``None``."""
-    from . import turn_protocol
-    for index in range(len(messages) - 1, -1, -1):
-        content = messages[index].get("content")
-        if (isinstance(content, str)
-                and turn_protocol.is_document_changing_result(content)):
-            return index
-    return None
-
-
-def _is_ephemeral_render(message):
-    """True for an on-demand render's images.
-
-    Unlike inspections there is no string-prefix fallback: render content is a
-    list of image blocks, so only the tag identifies it. A render reloaded from
-    a history written before this tag existed therefore survives — acceptable,
-    because the next document change drops it anyway.
-    """
-    return message.get("ephemeral") == "render"
-
-
-def _model_history(messages):
-    """The model-facing projection of the durable transcript.
-
-    ``Agent.messages`` is the record: it is persisted into the document, shown
-    in the chat panel, and exported. What the model sees is derived from it
-    here — superseded inspections collapse to a note, and state written by
-    older versions of the plugin is compacted out. Neither the transcript nor
-    the export is affected.
-    """
-    from . import turn_protocol
-    live = _live_inspection_index(messages)
-    changed_at = _last_document_change_index(messages)
-    compact = []
-    for index, message in enumerate(messages):
-        # Renders taken before the last document change depict geometry that
-        # no longer exists. Unlike a stale inspection they cannot be collapsed
-        # to a note the model can reason about — an image carries no timestamp
-        # — so they are dropped outright. Renders since that change all stay:
-        # views are directional, so a second angle complements the first
-        # rather than superseding it (contrast _live_inspection_index).
-        if _is_ephemeral_render(message) and (
-                changed_at is not None and index < changed_at):
-            continue
-        item = dict(message)
-        # Load-bearing, not tidiness: both providers forward message dicts
-        # verbatim, so an unstripped marker key would reach the wire payload.
-        item.pop("ephemeral", None)
-        query = item.pop("inspection_query", "")
-        if _is_ephemeral_inspection(message) and index != live:
-            item["content"] = turn_protocol.superseded_inspection(
-                query or "(query not recorded)",
-                verify_stage=str(message.get("content", "")).startswith(
-                    "[verify-stage"))
-            compact.append(item)
-            continue
-        content = item.get("content")
-        if isinstance(content, str):
-            if content.startswith("[document snapshot]\n"):
-                marker = "\n\n[request]\n"
-                if marker in content:
-                    content = "[request]\n" + content.split(marker, 1)[1]
-            for marker in ("\n[new snapshot]\n", "\n[design ledger]\n"):
-                if marker in content:
-                    content = content.split(marker, 1)[0].rstrip() + "\n"
-            if ("\n(script)\n" in content and index + 1 < len(messages)
-                    and str(messages[index + 1].get("content", "")).startswith(
-                        "[executed OK]")):
-                content = content.split("\n(script)\n", 1)[0].replace(
-                    "(intent)", "(executed intent)", 1)
-            item["content"] = content
-        compact.append(item)
-    return compact
 
 
 _EXCEPTION_LINE = re.compile(
@@ -258,9 +144,18 @@ class Agent:
         self.executor = executor
         self.app = app
         self.settings = settings
-        self.messages = []
+        self.transcript = Transcript()
         self.view_capture = view_capture
         self.access = DocumentAccess(inspector, app, self)
+
+    @property
+    def messages(self):
+        """Compatibility view of the transcript's durable messages."""
+        return self.transcript.messages
+
+    @messages.setter
+    def messages(self, messages):
+        self.transcript.replace_messages(messages)
 
     def _reject(self, feedback, proposal, on_tool_result=None, turn=None):
         """Reject a proposal: tell the model and show the user the same text.
@@ -535,7 +430,7 @@ class Agent:
             # approximation is how the transcript came to disagree with what
             # was actually sent — and the transcript is the only artefact left
             # to debug a bad turn from.
-            model_messages = _model_history(self.messages)
+            model_messages = self.transcript.model_messages()
             model_messages.append({
                 "role": "user",
                 "content": turn_protocol.current_context(
