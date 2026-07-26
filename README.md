@@ -8,6 +8,8 @@ result.
 Journeyman is available from every FreeCAD workbench and keeps a separate
 conversation for each open document.
 
+![Journeyman panel in FreeCAD](docs/screenshot.png)
+
 ## What it can do
 
 - Create and modify parametric FreeCAD models from plain-language requests.
