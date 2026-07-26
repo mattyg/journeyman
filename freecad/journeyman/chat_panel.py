@@ -1,4 +1,4 @@
-# freecad/llm_copilot/chat_panel.py
+# freecad/journeyman/chat_panel.py
 import base64
 import html
 import os
@@ -143,7 +143,22 @@ class _MainThreadRunner(QtCore.QObject):
             raise box["error"]
         return box["result"]
 
-class CopilotDockWidget(QtGui.QDockWidget):
+def _apply_window_icon(widget):
+    """Set the Journeyman mark as the dock's icon.
+
+    The icon is decoration: a missing or unreadable asset must never stop the
+    panel from being created, so failures are swallowed.
+    """
+    try:
+        from freecad.journeyman.resources import icon_path
+        path = icon_path()
+        if path:
+            widget.setWindowIcon(QtGui.QIcon(path))
+    except Exception:
+        pass
+
+
+class JourneymanDockWidget(QtGui.QDockWidget):
     # Append a line to the log (worker -> GUI thread; Qt queues cross-thread).
     resultReady = QtCore.Signal(object, str)
     # Ask the user to confirm an intent. Carries a threading.Event + a mutable
@@ -168,8 +183,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
     timeoutAsked = QtCore.Signal(object, str, object, object)
 
     def __init__(self, parent=None):
-        super().__init__("LLM Copilot", parent)
-        self.setObjectName("LLMCopilotDock")
+        super().__init__("Journeyman", parent)
+        self.setObjectName("JourneymanDock")
+        _apply_window_icon(self)
         body = QtGui.QWidget()
         layout = QtGui.QVBoxLayout(body)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -177,12 +193,12 @@ class CopilotDockWidget(QtGui.QDockWidget):
         # Persistent entry widgets: appending or updating one message never
         # rebuilds the rest of the transcript.
         self.log = QtGui.QScrollArea()
-        self.log.setObjectName("CopilotTranscript")
+        self.log.setObjectName("JourneymanTranscript")
         self.log.setWidgetResizable(True)
         self.log.setFrameShape(QtGui.QFrame.NoFrame)
         self.log.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.log.setStyleSheet(
-            "QScrollArea#CopilotTranscript {"
+            "QScrollArea#JourneymanTranscript {"
             " background: palette(base);"
             " border: 1px solid palette(mid);"
             " margin: 8px;"
@@ -214,9 +230,9 @@ class CopilotDockWidget(QtGui.QDockWidget):
         layout.addWidget(self.log)
 
         footer = QtGui.QWidget()
-        footer.setObjectName("CopilotComposer")
+        footer.setObjectName("JourneymanComposer")
         footer.setStyleSheet(
-            "QWidget#CopilotComposer {"
+            "QWidget#JourneymanComposer {"
             " background: palette(alternate-base);"
             " border-top: 1px solid palette(mid);"
             "}")
@@ -279,7 +295,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
         # Route client diagnostics to the FreeCAD report view so a "no response"
         # can be traced (e.g. model replied with text instead of a tool call).
         llm_client.DEBUG_LOG = lambda m: FreeCAD.Console.PrintMessage(
-            "[LLM Copilot] " + m + "\n")
+            "[Journeyman] " + m + "\n")
         self._document_timer = QtCore.QTimer(self)
         self._document_timer.setInterval(250)
         self._document_timer.timeout.connect(self._sync_document)
@@ -356,7 +372,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
                     "html": (
                         "<b>No active document</b>"
                         "<p>Create or open a FreeCAD document to use the "
-                        "LLM Copilot.</p>"),
+                        "Journeyman.</p>"),
                 }]
             agent.messages = messages
             state = {
@@ -430,14 +446,14 @@ class CopilotDockWidget(QtGui.QDockWidget):
         except Exception:
             import traceback
             FreeCAD.Console.PrintError(
-                "Could not persist LLM Copilot history:\n"
+                "Could not persist Journeyman history:\n"
                 + traceback.format_exc())
 
     def _new_transcript_page(self):
         page = QtGui.QWidget()
-        page.setObjectName("CopilotTranscriptPage")
+        page.setObjectName("JourneymanTranscriptPage")
         page.setStyleSheet(
-            "QWidget#CopilotTranscriptPage { background: palette(base); }")
+            "QWidget#JourneymanTranscriptPage { background: palette(base); }")
         layout = QtGui.QVBoxLayout(page)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(6)
@@ -1227,7 +1243,7 @@ class CopilotDockWidget(QtGui.QDockWidget):
             except Exception as e:
                 import traceback
                 FreeCAD.Console.PrintError(
-                    "LLM Copilot error:\n" + traceback.format_exc())
+                    "Journeyman error:\n" + traceback.format_exc())
                 self.resultReady.emit(
                     key, f"<b>Error:</b> {html.escape(str(e))}")
             finally:
@@ -1295,12 +1311,12 @@ def _ensure_dock():
     """Create the dock widget once and attach it to the main window.
 
     Attaching it makes it appear (and be toggleable) under View -> Panels in
-    every workbench, so the copilot is ambient rather than tied to a mode.
+    every workbench, so Journeyman is ambient rather than tied to a mode.
     """
     global _dock
     if _dock is None:
         mw = Gui.getMainWindow()
-        _dock = CopilotDockWidget(mw)
+        _dock = JourneymanDockWidget(mw)
         mw.addDockWidget(QtCore.Qt.RightDockWidgetArea, _dock)
     return _dock
 

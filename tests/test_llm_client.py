@@ -4,8 +4,8 @@ import pytest
 
 import urllib.error
 
-import freecad.llm_copilot.llm_client as lc
-from freecad.llm_copilot.settings import Settings
+import freecad.journeyman.llm_client as lc
+from freecad.journeyman.settings import Settings
 
 
 def _settings(model="openai/gpt-5.4", api_key="sk-x", api_base="",

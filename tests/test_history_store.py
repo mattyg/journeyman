@@ -1,5 +1,5 @@
-from freecad.llm_copilot.history_store import encode, decode
-from freecad.llm_copilot.types import ExecResult
+from freecad.journeyman.history_store import encode, decode
+from freecad.journeyman.types import ExecResult
 
 
 def test_compressed_history_roundtrip_restores_execution_results_and_images():

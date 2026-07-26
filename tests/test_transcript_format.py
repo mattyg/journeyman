@@ -1,4 +1,4 @@
-from freecad.llm_copilot.transcript_format import wrappable_escape, wrapped_pre
+from freecad.journeyman.transcript_format import wrappable_escape, wrapped_pre
 
 
 def test_wrappable_escape_escapes_html():

@@ -1,6 +1,6 @@
-from freecad.llm_copilot import turn_protocol
-from freecad.llm_copilot.settings import Settings
-from freecad.llm_copilot.types import ExecResult
+from freecad.journeyman import turn_protocol
+from freecad.journeyman.settings import Settings
+from freecad.journeyman.types import ExecResult
 
 
 def _settings(**kw):

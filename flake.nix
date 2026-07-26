@@ -1,5 +1,5 @@
 {
-  description = "FreeCAD LLM Copilot — development environment";
+  description = "FreeCAD Journeyman — development environment";
 
   # Pin to the stable release channel. Its FreeCAD/VTK are in the binary cache, so
   # the dev shell substitutes prebuilt binaries instead of compiling from source
@@ -33,7 +33,7 @@
           ];
 
           shellHook = ''
-            echo "FreeCAD LLM Copilot dev shell"
+            echo "FreeCAD Journeyman dev shell"
             echo "  pure-Python tests : python3 -m pytest tests/test_*.py -v"
             echo "  integration tests : freecadcmd tests/integration/run_headless.py"
             export PYTHONPATH="$PWD:$PYTHONPATH"

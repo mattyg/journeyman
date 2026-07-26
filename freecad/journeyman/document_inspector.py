@@ -301,7 +301,7 @@ def snapshot(app, rich=False) -> str:
     if doc is None:
         return ("NO_ACTIVE_DOCUMENT\n"
                 "There is no active document. The user must create or open one "
-                "before using the copilot.")
+                "before using Journeyman.")
     if rich:
         return (
             "[rich state]\n"

@@ -1,4 +1,4 @@
-from freecad.llm_copilot.context_usage import estimate_tokens, format_usage
+from freecad.journeyman.context_usage import estimate_tokens, format_usage
 
 
 def test_usage_increases_with_conversation():

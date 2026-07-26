@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 # FreeCAD parameter group for this addon's settings. Follows the FreeCAD
 # convention (BaseApp/Preferences/Mod/<Name>).
-PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/LLMCopilot"
+PARAM_PATH = "User parameter:BaseApp/Preferences/Mod/Journeyman"
 
 # Providers the settings UI knows about. Order is the dropdown order.
 PROVIDERS = ("anthropic", "openai", "openrouter", "ollama")
@@ -237,13 +237,13 @@ def model_display_name(model: str) -> str:
       "openrouter/moonshotai/kimi-k3" -> "Kimi K3"
       "anthropic/claude-opus-4-8"     -> "Claude Opus 4 8"
       "ollama/llama3"                 -> "Llama3"
-    Falls back to "Copilot" when no model is set.
+    Falls back to "Journeyman" when no model is set.
     """
     if not model:
-        return "Copilot"
+        return "Journeyman"
     bare = model.rsplit("/", 1)[-1]          # last path segment
     words = bare.replace("_", "-").split("-")
-    return " ".join(w[:1].upper() + w[1:] if w else w for w in words) or "Copilot"
+    return " ".join(w[:1].upper() + w[1:] if w else w for w in words) or "Journeyman"
 
 
 def load_settings(param_get) -> "Settings":

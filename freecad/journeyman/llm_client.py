@@ -1,4 +1,4 @@
-"""Zero-dependency LLM client for the FreeCAD copilot.
+"""Zero-dependency LLM client for the FreeCAD journeyman.
 
 Provider-agnostic over anything that speaks the OpenAI chat-completions format
 (OpenAI, Ollama, OpenRouter, most gateways) plus Anthropic's native Messages
@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from .settings import Settings
 
 SYSTEM_PROMPT = (
-    "You are a CAD copilot operating inside FreeCAD. You receive a text snapshot "
+    "You are a CAD journeyman operating inside FreeCAD. You receive a text snapshot "
     "of the active document before each turn.\n"
     "\n"
     "You have five tools and MUST call one on every turn (you cannot reply "

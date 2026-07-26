@@ -1,5 +1,5 @@
 # tests/test_api_reference.py
-from freecad.llm_copilot.api_reference import _guide
+from freecad.journeyman.api_reference import _guide
 
 
 def test_deletion_query_names_the_real_sketcher_methods():

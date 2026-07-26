@@ -1,8 +1,8 @@
 # tests/test_script_executor.py
 import pytest
 
-from freecad.llm_copilot import script_executor
-from freecad.llm_copilot.script_executor import (
+from freecad.journeyman import script_executor
+from freecad.journeyman.script_executor import (
     _annotate_traceback, assert_feature, assert_sketch_constrained)
 
 SCRIPT = "\n".join(f"line{n} = {n}" for n in range(1, 21))
@@ -321,7 +321,7 @@ class ValidatingDoc(RecordingDoc):
 
 def test_validation_failure_names_what_broke():
     """A bare POST_EXECUTION_VALIDATION_FAILED told the model nothing."""
-    import freecad.llm_copilot.document_inspector as di
+    import freecad.journeyman.document_inspector as di
     app = RecordingApp()
     original_state, original_validate = di.document_state, di.validate
     di.document_state = lambda _app, rich=True: {"objects": {}}

@@ -1,18 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
-  <name>LLM Copilot</name>
-  <description>Provider-agnostic LLM copilot for creating and editing CAD models.</description>
+  <name>Journeyman</name>
+  <description>Provider-agnostic AI assistant for creating and editing CAD models.</description>
   <version>0.1.0</version>
   <date>2026-07-23</date>
-  <maintainer email="matt@buildyourweb.app">matt</maintainer>
+  <maintainer email="matt@buildyourweb.app">mattyg</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
-  <url type="repository" branch="main">https://github.com/matt/freecad-llm-plugin</url>
-  <url type="readme">https://github.com/matt/freecad-llm-plugin/blob/main/README.md</url>
+  <url type="repository" branch="main">https://github.com/mattyg/freecad-journeyman</url>
+  <url type="readme">https://github.com/mattyg/freecad-journeyman/blob/main/README.md</url>
+  <icon>freecad/journeyman/resources/icons/Journeyman.svg</icon>
   <content>
-    <!-- Not a workbench: an ambient dock widget + preferences page, registered
-         from freecad/llm_copilot/init_gui.py at GUI startup. -->
     <other/>
   </content>
-  <!-- No Python dependencies: the LLM client uses only the standard library
-       (urllib + json), so nothing needs to be pip-installed or vendored. -->
 </package>

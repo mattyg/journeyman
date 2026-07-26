@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from freecad.llm_copilot import cad_workflow
-from freecad.llm_copilot.settings import Settings
+from freecad.journeyman import cad_workflow
+from freecad.journeyman.settings import Settings
 
 
 def _settings(**changes):

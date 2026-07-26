@@ -1,4 +1,4 @@
-from freecad.llm_copilot.document_inspector import DocumentDelta, structured_diff
+from freecad.journeyman.document_inspector import DocumentDelta, structured_diff
 
 
 def _state(objects):

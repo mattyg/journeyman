@@ -197,7 +197,7 @@ def run(app, script: str, validate=False, rollback_on_failure=False,
     if validate:
         from . import document_inspector
         before_state = document_inspector.document_state(app, rich=True)
-    doc.openTransaction("LLM Copilot")
+    doc.openTransaction("Journeyman")
     stdout = io.StringIO()
     stderr = io.StringIO()
     console_warnings = io.StringIO()

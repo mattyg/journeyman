@@ -1,4 +1,4 @@
-# freecad/llm_copilot/types.py
+# freecad/journeyman/types.py
 from dataclasses import dataclass
 
 @dataclass

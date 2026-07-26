@@ -6,7 +6,7 @@ import zlib
 from .types import ExecResult
 
 
-OBJECT_NAME = "LLMCopilotChatHistory"
+OBJECT_NAME = "JourneymanChatHistory"
 PROPERTY_NAME = "Payload"
 FORMAT_VERSION = 1
 
@@ -66,8 +66,8 @@ def save(doc, messages, entries):
     obj = doc.getObject(OBJECT_NAME)
     if obj is None:
         obj = doc.addObject("App::FeaturePython", OBJECT_NAME)
-        obj.Label = "LLM Copilot chat history"
-        obj.addProperty("App::PropertyString", PROPERTY_NAME, "LLM Copilot")
+        obj.Label = "Journeyman chat history"
+        obj.addProperty("App::PropertyString", PROPERTY_NAME, "Journeyman")
         try:
             obj.Visibility = False
         except Exception:

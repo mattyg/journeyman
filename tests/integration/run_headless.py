@@ -1,7 +1,7 @@
 # tests/integration/run_headless.py
 import os, sys, unittest
 
-# Ensure repo root on path so `import freecad.llm_copilot...` works.
+# Ensure repo root on path so `import freecad.journeyman...` works.
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 

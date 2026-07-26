@@ -1,4 +1,4 @@
-# freecad/llm_copilot/agent.py
+# freecad/journeyman/agent.py
 import re
 
 

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Journeyman</title>
+  <!-- Maker's-mark J: a straight stem and quarter-arc hook drawn as sketch
+       geometry, with a four-point AI spark centred above the stem. The
+       spark's edges are straight (drafted) rather than curved, so it reads
+       as CAD geometry rather than a soft glow.
+
+       The gap between spark and stem is deliberate: when the two touch they
+       merge into an illegible blob at small sizes.
+
+       Paints with currentColor so a host stylesheet can theme it; the
+       fallback brass (#B8860B) has enough contrast on both light and dark
+       FreeCAD themes. -->
+  <g fill="none" stroke="currentColor" color="#B8860B"
+     stroke-width="7" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M 42 26 L 42 38"/>
+    <path d="M 42 38 A 13 13 0 0 1 16 38"/>
+  </g>
+  <path d="M 42 2 L 45.6 12.4 L 56 16 L 45.6 19.6 L 42 30 L 38.4 19.6 L 28 16 L 38.4 12.4 Z"
+        fill="currentColor" color="#B8860B"/>
+</svg>

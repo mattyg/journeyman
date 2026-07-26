@@ -1,4 +1,4 @@
-from freecad.llm_copilot.view_capture import changed_object_names, _png_bytes
+from freecad.journeyman.view_capture import changed_object_names, _png_bytes
 
 
 def test_changed_object_names_finds_created_and_modified_objects():
@@ -19,7 +19,7 @@ def test_png_encoder_writes_a_valid_signature_and_chunks():
 def test_contact_sheet_layout_has_three_rows_and_columns():
     # The actual shape rendering is covered under freecadcmd; this verifies the
     # documented seven-view sheet dimensions through its 3x3 layout constants.
-    from freecad.llm_copilot.view_capture import _VIEWS
+    from freecad.journeyman.view_capture import _VIEWS
     assert [name for name, _direction in _VIEWS] == [
         "front", "back", "left", "right", "top", "bottom", "isometric",
     ]

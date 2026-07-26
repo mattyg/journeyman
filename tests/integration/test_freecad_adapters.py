@@ -3,14 +3,14 @@ import unittest
 import os
 import tempfile
 import FreeCAD as App
-from freecad.llm_copilot import document_inspector as di
-from freecad.llm_copilot import view_capture
-from freecad.llm_copilot import history_store
-from freecad.llm_copilot import api_reference
-from freecad.llm_copilot.types import ExecResult
-from freecad.llm_copilot.document_binding import (
+from freecad.journeyman import document_inspector as di
+from freecad.journeyman import view_capture
+from freecad.journeyman import history_store
+from freecad.journeyman import api_reference
+from freecad.journeyman.types import ExecResult
+from freecad.journeyman.document_binding import (
     PinnedDocumentApp, run_with_document)
-from freecad.llm_copilot.image_processing import (
+from freecad.journeyman.image_processing import (
     contrast_enhanced, edge_enhanced)
 
 class InspectorTests(unittest.TestCase):
@@ -172,7 +172,7 @@ class InspectorTests(unittest.TestCase):
 
 
 # add to tests/integration/test_freecad_adapters.py
-from freecad.llm_copilot import script_executor as se
+from freecad.journeyman import script_executor as se
 
 class ExecutorTests(unittest.TestCase):
     def setUp(self): self.doc = App.newDocument("E")

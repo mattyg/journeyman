@@ -1,6 +1,6 @@
-"""Dependency check for the LLM Copilot addon.
+"""Dependency check for the Journeyman addon.
 
-The copilot's LLM client is written against the Python standard library only
+Journeyman's LLM client is written against the Python standard library only
 (urllib + json), so there is nothing to pip-install into FreeCAD's Python. This
 module verifies that the stdlib pieces the client relies on are importable and
 returns True; it exists so the workbench has a single, stable place to gate on
@@ -14,7 +14,7 @@ import importlib
 _REQUIRED = ("urllib.request", "json")
 
 GUIDANCE = (
-    "LLM Copilot could not import a required standard-library module. This "
+    "Journeyman could not import a required standard-library module. This "
     "usually means FreeCAD is running on a stripped-down Python build. Please "
     "report this with your FreeCAD version."
 )

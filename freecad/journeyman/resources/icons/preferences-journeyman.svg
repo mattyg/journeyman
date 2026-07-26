@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <title>Journeyman preferences</title>
+  <!-- Preferences-group icon. The filename is load-bearing: FreeCAD's
+       preferences dialog resolves a group's icon by name, as
+       "preferences-<group lowercased, spaces to underscores>", searching the
+       directories registered with Gui.addIconPath(). Our group is
+       "Journeyman", so this must stay named preferences-journeyman.svg.
+
+       Geometry is the Journeyman mark from Journeyman.svg — keep the two in
+       sync. Colour is hard-coded rather than currentColor: the dialog
+       rasterises this into a QIcon with no stylesheet context, so an
+       unresolved currentColor would fall back to black. -->
+  <g fill="none" stroke="#B8860B"
+     stroke-width="7" stroke-linecap="butt" stroke-linejoin="miter">
+    <path d="M 42 26 L 42 38"/>
+    <path d="M 42 38 A 13 13 0 0 1 16 38"/>
+  </g>
+  <path d="M 42 2 L 45.6 12.4 L 56 16 L 45.6 19.6 L 42 30 L 38.4 19.6 L 28 16 L 38.4 12.4 Z"
+        fill="#B8860B"/>
+</svg>

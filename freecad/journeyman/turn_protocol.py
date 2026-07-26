@@ -1,4 +1,4 @@
-"""The wire protocol between the copilot and the model.
+"""The wire protocol between Journeyman and the model.
 
 Every message the agent feeds back to the model is a block of text tagged with
 a bracketed section header (``[document snapshot]``, ``[executed OK]``,

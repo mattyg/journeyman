@@ -1,4 +1,4 @@
-import freecad.llm_copilot.deps as deps
+import freecad.journeyman.deps as deps
 
 
 def test_ensure_reports_true_when_importable(monkeypatch):

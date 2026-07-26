@@ -1,4 +1,4 @@
-"""Custom FreeCAD preferences page for the LLM Copilot.
+"""Custom FreeCAD preferences page for Journeyman.
 
 Built in code (not a static .ui) so the Model dropdown can be populated from a
 live provider fetch. Follows FreeCAD's preference-page protocol: a class taking
@@ -45,11 +45,14 @@ class _FetchBridge(QtCore.QObject):
     done = QtCore.Signal(str, object, str)
 
 
-class LLMCopilotPreferencesPage:
+class JourneymanPreferencesPage:
     def __init__(self, parent=None):
         self._param = FreeCAD.ParamGet(st.PARAM_PATH)
         self.form = QtGui.QWidget(parent)
-        self.form.setWindowTitle("LLM Copilot")
+        # Names the tab inside the "Journeyman" preferences group. FreeCAD's
+        # own groups call their first tab "General"; the group in the left-hand
+        # rail is what carries the product name.
+        self.form.setWindowTitle("General")
         self._bridge = _FetchBridge(self.form)
         self._bridge.done.connect(self._on_fetch_done)
         self._build_ui()
@@ -414,7 +417,7 @@ class LLMCopilotPreferencesPage:
         if error:
             self.statusLabel.setText("Couldn't fetch models (using saved list)")
             FreeCAD.Console.PrintLog(
-                "LLM Copilot model fetch failed: %s\n" % error)
+                "Journeyman model fetch failed: %s\n" % error)
             return
         if models:
             st.set_cached_models(self._param, provider, list(models))

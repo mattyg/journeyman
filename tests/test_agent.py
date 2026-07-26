@@ -1,13 +1,13 @@
 # tests/test_agent.py
 import threading
 
-from freecad.llm_copilot.agent import Agent, _model_history
-from freecad.llm_copilot.agent import AgentCancelled
-from freecad.llm_copilot.types import ExecResult
-from freecad.llm_copilot.llm_client import LLMProposal
-from freecad.llm_copilot.llm_client import LLMTimeoutError
-from freecad.llm_copilot.settings import Settings
-from freecad.llm_copilot import cad_workflow
+from freecad.journeyman.agent import Agent, _model_history
+from freecad.journeyman.agent import AgentCancelled
+from freecad.journeyman.types import ExecResult
+from freecad.journeyman.llm_client import LLMProposal
+from freecad.journeyman.llm_client import LLMTimeoutError
+from freecad.journeyman.settings import Settings
+from freecad.journeyman import cad_workflow
 
 class FakeClient:
     def __init__(self, proposals): self.proposals, self.calls = proposals, []
@@ -951,7 +951,7 @@ def test_user_images_are_sent_in_initial_multimodal_message():
 
 
 # --- Direct handler tests (seams exposed by extracting Agent.send) ---------
-from freecad.llm_copilot.agent import _Turn, LOOP
+from freecad.journeyman.agent import _Turn, LOOP
 
 
 def _bare_agent(settings):
@@ -991,7 +991,7 @@ def test_handle_question_rejects_too_few_options():
 
 
 # --- DocumentAccess adaptation (the seam that replaced four inline shims) ----
-from freecad.llm_copilot.agent import DocumentAccess
+from freecad.journeyman.agent import DocumentAccess
 
 
 class _StubAgent:
@@ -1116,7 +1116,7 @@ def test_a_different_error_on_the_same_step_resets_the_counter():
 
 
 def test_feature_signature_ignores_cosmetic_script_changes():
-    from freecad.llm_copilot.agent import _feature_signature
+    from freecad.journeyman.agent import _feature_signature
     first = LLMProposal("pad", "pad.Length = 4.0", "", True, plan_step=2)
     second = LLMProposal("pad", "pad.Length = 5.0", "", True, plan_step=2)
     assert (_feature_signature(first, _occ_failure(13))
@@ -1578,7 +1578,7 @@ def test_redefined_ledger_row_is_still_reported():
 
 def test_rate_limit_offers_a_retry_and_continues():
     """Automatic backoff is spent by now; waiting is all that helps."""
-    from freecad.llm_copilot.llm_client import LLMRateLimitError
+    from freecad.journeyman.llm_client import LLMRateLimitError
 
     class RateLimitedOnce(FakeClient):
         def __init__(self, proposals):
@@ -1607,7 +1607,7 @@ def test_rate_limit_offers_a_retry_and_continues():
 
 
 def test_declined_rate_limit_retry_preserves_context():
-    from freecad.llm_copilot.llm_client import LLMRateLimitError
+    from freecad.journeyman.llm_client import LLMRateLimitError
 
     class AlwaysLimited(FakeClient):
         def complete(self, messages, settings):
@@ -1625,7 +1625,7 @@ def test_declined_rate_limit_retry_preserves_context():
 
 
 def test_rate_limit_without_a_handler_does_not_crash_the_turn():
-    from freecad.llm_copilot.llm_client import LLMRateLimitError
+    from freecad.journeyman.llm_client import LLMRateLimitError
 
     class AlwaysLimited(FakeClient):
         def complete(self, messages, settings):
