@@ -1,6 +1,6 @@
 from freecad.journeyman import turn_protocol
 from freecad.journeyman.settings import Settings
-from freecad.journeyman.types import ExecResult
+from freecad.journeyman.script_executor import ExecResult
 
 
 def _settings(**kw):

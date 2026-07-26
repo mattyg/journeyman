@@ -3,7 +3,7 @@ import threading
 
 from freecad.journeyman.agent import Agent, _model_history
 from freecad.journeyman.agent import AgentCancelled
-from freecad.journeyman.types import ExecResult
+from freecad.journeyman.script_executor import ExecResult
 from freecad.journeyman.llm_client import LLMProposal
 from freecad.journeyman.llm_client import LLMTimeoutError
 from freecad.journeyman.settings import Settings

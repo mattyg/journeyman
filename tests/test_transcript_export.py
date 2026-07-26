@@ -1,6 +1,6 @@
 # tests/test_transcript_export.py
 from freecad.journeyman.transcript_export import entries_to_markdown
-from freecad.journeyman.types import ExecResult
+from freecad.journeyman.script_executor import ExecResult
 
 
 def test_entries_to_markdown_renders_all_kinds():

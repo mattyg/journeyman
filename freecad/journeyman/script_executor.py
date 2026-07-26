@@ -2,7 +2,22 @@ import io
 import re
 import traceback
 import contextlib
-from .types import ExecResult
+from dataclasses import dataclass
+
+
+@dataclass
+class ExecResult:
+    """Complete observable outcome of one transactional script execution."""
+
+    ok: bool
+    output: str
+    error: str
+    validation_ok: bool = True
+    validation: str = ""
+    rolled_back: bool = False
+    stderr: str = ""
+    console_warnings: str = ""
+    console_errors: str = ""
 
 
 _WARNING_METHODS = (
