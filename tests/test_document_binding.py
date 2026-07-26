@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from freecad.journeyman.document_binding import (
+from freecad.journeyman.document_session import (
     PinnedDocumentApp, run_with_document)
 
 

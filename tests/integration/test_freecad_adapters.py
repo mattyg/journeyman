@@ -8,7 +8,7 @@ from freecad.journeyman import view_capture
 from freecad.journeyman import history_store
 from freecad.journeyman import api_reference
 from freecad.journeyman.script_executor import ExecResult
-from freecad.journeyman.document_binding import (
+from freecad.journeyman.document_session import (
     PinnedDocumentApp, run_with_document)
 from freecad.journeyman.image_processing import (
     contrast_enhanced, edge_enhanced)

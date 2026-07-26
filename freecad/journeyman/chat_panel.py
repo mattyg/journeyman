@@ -13,8 +13,9 @@ from . import (
 )
 from .agent import Agent, AgentCancelled
 from .context_usage import format_usage
-from .document_binding import PinnedDocumentApp, run_with_document
-from .document_session import DocumentSession
+from .document_session import (
+    DocumentSession, PinnedDocumentApp, run_with_document,
+)
 from .image_processing import reference_triptych
 from .markdown import to_html as markdown_to_html
 from .settings import load_settings, model_display_name, PARAM_PATH
