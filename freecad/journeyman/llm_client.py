@@ -793,6 +793,10 @@ def list_models(provider: str, settings: Settings) -> list:
     the caller can fall back to a cached/curated list.
     """
     provider = (provider or "").lower()
+    if (provider == "openai" and
+            getattr(settings, "openai_auth_method", "api_key") == "chatgpt"):
+        from . import codex_app_server
+        return codex_app_server.list_models()
     if provider == "ollama":
         # Ollama's native tags endpoint lives at the host root, not under /v1.
         base = (settings.api_base or _base_url(settings, "ollama")).rstrip("/")
@@ -1053,6 +1057,10 @@ def _complete_anthropic(wire_model: str, messages: list,
 
 def complete(messages: list, settings: Settings) -> "LLMProposal":
     provider, wire_model = _split_model(settings.model)
+    if (provider == "openai" and
+            getattr(settings, "openai_auth_method", "api_key") == "chatgpt"):
+        from . import codex_app_server
+        return codex_app_server.complete(messages, settings)
     if provider == "anthropic":
         return _complete_anthropic(wire_model, messages, settings)
     return _complete_openai(wire_model, provider, messages, settings)

@@ -92,6 +92,26 @@ def test_finish_falls_back_to_text_when_no_summary():
     assert finish.text == "loose text"
 
 
+def test_openai_chatgpt_auth_dispatches_to_codex_app_server(monkeypatch):
+    from freecad.journeyman import codex_app_server
+
+    expected = lc.FinishProposal("", "", "done", False, kind="finish")
+    captured = {}
+
+    def complete(messages, settings):
+        captured["messages"] = messages
+        captured["settings"] = settings
+        return expected
+
+    monkeypatch.setattr(codex_app_server, "complete", complete)
+    settings = _settings(api_key="must-not-be-used")
+    settings.openai_auth_method = "chatgpt"
+    messages = [{"role": "user", "content": "box"}]
+
+    assert lc.complete(messages, settings) is expected
+    assert captured["messages"] == messages
+
+
 def test_openai_parses_tool_call(monkeypatch):
     captured = {}
     _patch_http(monkeypatch,

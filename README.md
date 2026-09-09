@@ -35,16 +35,22 @@ your FreeCAD `Mod` directory under the name `Journeyman`. A common Linux path is
 ```
 
 Journeyman uses FreeCAD's bundled Python and the standard library. No separate
-`pip install` is required.
+Python package installation is required. ChatGPT subscription login is optional
+and requires the OpenAI Codex CLI executable.
 
 ## Setup
 
 1. Open **Edit → Preferences → Journeyman**.
 2. Choose OpenAI, Anthropic, OpenRouter, or Ollama.
-3. Enter the provider's API key, or the server address for Ollama.
-4. Choose a model.
-5. Create or open a FreeCAD document.
-6. Show the panel from **View → Panels → Journeyman**.
+3. For OpenAI, choose either **API key** for usage-based Platform billing or
+   **ChatGPT subscription** and select **Sign in with OpenAI**. Subscription
+   login uses the official Codex browser flow and requires the `codex`
+   executable on FreeCAD's `PATH`.
+4. For other hosted providers, enter the API key. For Ollama, enter the server
+   address.
+5. Choose a model.
+6. Create or open a FreeCAD document.
+7. Show the panel from **View → Panels → Journeyman**.
 
 Try a request such as:
 
@@ -71,6 +77,20 @@ reviews its results. Common options include:
 
 The defaults favor reviewable, incremental changes. More autonomous settings
 can reduce interruptions but should be enabled deliberately.
+
+### OpenAI sign-in troubleshooting
+
+- **Codex CLI is required**: install OpenAI's Codex CLI and verify that
+  `codex --version` works in the environment that launches FreeCAD.
+- **Sign-in expired or was revoked**: return to Preferences, select
+  **ChatGPT subscription**, and sign in again. Codex owns token refresh and
+  credential storage; Journeyman never copies OAuth tokens into FreeCAD
+  preferences or documents.
+- **Wrong billing source**: **API key** uses OpenAI Platform billing.
+  **ChatGPT subscription** uses the selected ChatGPT workspace's eligible
+  Codex allowance. Journeyman never silently switches between them.
+- **Sign out**: select **Sign out** in Preferences. This clears the
+  Codex-managed login shared by local Codex clients.
 
 ## Safety
 

@@ -78,6 +78,35 @@ def test_load_resolves_selected_provider_and_key():
     assert s.api_key == "sk-oai"
 
 
+def test_openai_auth_method_is_explicit_and_provider_scoped():
+    p = FakeParam()
+    set_provider(p, "openai")
+    st.set_openai_auth_method(p, "chatgpt")
+
+    assert st.get_openai_auth_method(p) == "chatgpt"
+    assert load_settings(p).openai_auth_method == "chatgpt"
+
+    set_provider(p, "anthropic")
+    assert load_settings(p).openai_auth_method == "api_key"
+
+
+def test_invalid_openai_auth_method_fails_closed_to_api_key():
+    p = FakeParam()
+    p.SetString("OpenAIAuthMethod", "shared-browser-cookie")
+
+    assert st.get_openai_auth_method(p) == "api_key"
+
+
+def test_saving_another_provider_preserves_openai_auth_method():
+    p = FakeParam()
+    st.set_openai_auth_method(p, "chatgpt")
+    set_provider(p, "anthropic")
+
+    save_settings(p, load_settings(p))
+
+    assert st.get_openai_auth_method(p) == "chatgpt"
+
+
 def test_ollama_uses_host_not_key():
     p = FakeParam()
     set_provider(p, "ollama")

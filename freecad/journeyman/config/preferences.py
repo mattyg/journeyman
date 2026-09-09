@@ -45,6 +45,11 @@ class _FetchBridge(QtCore.QObject):
     done = QtCore.Signal(str, object, str)
 
 
+
+class _AuthBridge(QtCore.QObject):
+    open_url = QtCore.Signal(str)
+    done = QtCore.Signal(object, str)
+
 class JourneymanPreferencesPage:
     def __init__(self, parent=None):
         self._param = FreeCAD.ParamGet(st.PARAM_PATH)
@@ -55,6 +60,9 @@ class JourneymanPreferencesPage:
         self.form.setWindowTitle("General")
         self._bridge = _FetchBridge(self.form)
         self._bridge.done.connect(self._on_fetch_done)
+        self._auth_bridge = _AuthBridge(self.form)
+        self._auth_bridge.open_url.connect(self._open_auth_url)
+        self._auth_bridge.done.connect(self._on_auth_done)
         self._build_ui()
         self.loadSettings()
 
@@ -76,6 +84,21 @@ class JourneymanPreferencesPage:
         self.apiKeyEdit.setPlaceholderText("API key for the selected provider")
         form.addRow("API key", self.apiKeyEdit)
         self._apiKeyLabel = form.labelForField(self.apiKeyEdit)
+
+        self.authMethodCombo = QtGui.QComboBox()
+        self.authMethodCombo.addItem("API key (usage-based billing)", "api_key")
+        self.authMethodCombo.addItem(
+            "ChatGPT subscription (Codex OAuth)", "chatgpt")
+        form.addRow("Authentication", self.authMethodCombo)
+        self._authMethodLabel = form.labelForField(self.authMethodCombo)
+
+        authRow = QtGui.QHBoxLayout()
+        self.authButton = QtGui.QPushButton("Sign in with OpenAI")
+        self.signOutButton = QtGui.QPushButton("Sign out")
+        authRow.addWidget(self.authButton)
+        authRow.addWidget(self.signOutButton)
+        form.addRow("OpenAI account", authRow)
+        self._authRowLabel = form.labelForField(authRow)
 
         self.hostEdit = QtGui.QLineEdit()
         self.hostEdit.setPlaceholderText(st.OLLAMA_DEFAULT_BASE)
@@ -255,6 +278,10 @@ class JourneymanPreferencesPage:
         self.hostEdit.editingFinished.connect(self._save_host)
         self.modelCombo.currentTextChanged.connect(self._save_model)
 
+        self.authMethodCombo.currentIndexChanged.connect(
+            self._on_auth_method_changed)
+        self.authButton.clicked.connect(self._start_login)
+        self.signOutButton.clicked.connect(self._start_logout)
     # ---- FreeCAD preference-page protocol ----
 
     def loadSettings(self):
@@ -373,22 +400,50 @@ class JourneymanPreferencesPage:
         if self._reasoningLabel is not None:
             self._reasoningLabel.setVisible(has_reasoning)
 
+        is_openai = provider == "openai"
+        method = st.get_openai_auth_method(self._param)
+        auth_index = self.authMethodCombo.findData(method)
+        self.authMethodCombo.blockSignals(True)
+        self.authMethodCombo.setCurrentIndex(max(0, auth_index))
+        self.authMethodCombo.blockSignals(False)
+        self.authMethodCombo.setVisible(is_openai)
+        if self._authMethodLabel is not None:
+            self._authMethodLabel.setVisible(is_openai)
+        oauth = is_openai and method == "chatgpt"
+        self.authButton.setVisible(oauth)
+        self.signOutButton.setVisible(oauth)
+        if self._authRowLabel is not None:
+            self._authRowLabel.setVisible(oauth)
+        self.apiKeyEdit.setVisible(not is_ollama and not oauth)
+        if self._apiKeyLabel is not None:
+            self._apiKeyLabel.setVisible(not is_ollama and not oauth)
+
         p = self._param
         self.apiKeyEdit.setText(st.get_api_key(p, provider))
         self.hostEdit.setText(st.get_api_base(p, provider) if is_ollama else "")
 
+        if oauth and fetch:
+            self._start_account_check()
         self._populate_models(provider, st.get_cached_models(p, provider))
         if fetch and self._has_credentials(provider):
             self._start_fetch(provider)
 
     def _has_credentials(self, provider):
         if provider == "ollama":
-            return True  # local; try the default/host regardless
+            return True
+        if (provider == "openai" and
+                st.get_openai_auth_method(self._param) == "chatgpt"):
+            return True
         return bool(st.get_api_key(self._param, provider))
 
     def _populate_models(self, provider, models):
         current = st.get_model_for_provider(self._param, provider)
         # Newest/flagship-first: family tier then natural version order (so
+        if (provider == "openai" and
+                st.get_openai_auth_method(self._param) == "chatgpt" and
+                models and current not in models):
+            current = models[0]
+            st.set_model_for_provider(self._param, provider, current)
         # claude-opus-4-8 is above -4-7, and -4-10 above -4-8).
         models = st.sort_models(models, provider)
         self.modelCombo.blockSignals(True)
@@ -435,7 +490,88 @@ class JourneymanPreferencesPage:
         else:
             self.statusLabel.setText("No models returned")
 
+    def _start_account_check(self):
+        self._set_auth_busy(True)
+        self.statusLabel.setText("Checking OpenAI sign-in…")
+        bridge = self._auth_bridge
+
+        def work():
+            try:
+                from .. import codex_app_server
+                account = codex_app_server.account_status()
+                error = ""
+            except Exception as exc:
+                account, error = None, str(exc)
+            bridge.done.emit(account, error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _set_auth_busy(self, busy):
+        self.authButton.setEnabled(not busy)
+        self.signOutButton.setEnabled(not busy)
+
+    def _start_login(self):
+        self._set_auth_busy(True)
+        self.statusLabel.setText("Waiting for OpenAI sign-in…")
+        bridge = self._auth_bridge
+
+        def work():
+            try:
+                from .. import codex_app_server
+                account = codex_app_server.login(bridge.open_url.emit)
+                error = ""
+            except Exception as exc:
+                account, error = None, str(exc)
+            bridge.done.emit(account, error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _start_logout(self):
+        self._set_auth_busy(True)
+        self.statusLabel.setText("Signing out…")
+        bridge = self._auth_bridge
+
+        def work():
+            try:
+                from .. import codex_app_server
+                codex_app_server.logout()
+                account, error = codex_app_server.Account(), ""
+            except Exception as exc:
+                account, error = None, str(exc)
+            bridge.done.emit(account, error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _open_auth_url(self, url):
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+
+    def _on_auth_done(self, account, error):
+        self._set_auth_busy(False)
+        if error:
+            self.statusLabel.setText(error)
+            return
+        if account is not None and account.signed_in:
+            detail = account.plan_type.capitalize() if account.plan_type else "ChatGPT"
+            self.statusLabel.setText("Signed in — %s subscription" % detail)
+        elif account is not None and account.requires_auth:
+            self.statusLabel.setText("OpenAI sign-in required")
+        else:
+            self.statusLabel.setText("Signed out")
+
     # ---- signal handlers (GUI thread) ----
+
+    def _on_auth_method_changed(self, _index):
+        if self._current_provider() != "openai":
+            return
+        st.set_openai_auth_method(
+            self._param, self.authMethodCombo.currentData())
+        self._sync_provider_fields("openai", fetch=False)
+        if self.authMethodCombo.currentData() == "chatgpt":
+            self.statusLabel.setText(
+                "ChatGPT subscription access requires the Codex CLI.")
+        else:
+            self.statusLabel.setText(
+                "OpenAI API usage is billed through the Platform account.")
 
     def _on_provider_changed(self, _index):
         # Persist the outgoing provider's key/host (which the combo change may

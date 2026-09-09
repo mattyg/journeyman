@@ -18,6 +18,7 @@ PROVIDER_LABELS = {
 
 # Ollama is local and keyless; it needs a host URL instead of an API key.
 OLLAMA_DEFAULT_BASE = "http://localhost:11434/v1"
+OPENAI_AUTH_METHODS = ("api_key", "chatgpt")
 
 # Curated fallback model lists, shown before/instead of a live fetch (no key
 # yet, offline, or fetch failed). The live fetch (list_models) replaces these
@@ -94,6 +95,7 @@ class Settings:
     one_feature_per_step: bool = False
     keep_partial_on_error: bool = True
     on_demand_render: bool = True
+    openai_auth_method: str = "api_key"
 
 
 # Family tiers we prefer to surface first, per provider, when the model id
@@ -182,6 +184,17 @@ def get_api_key(param_get, provider: str) -> str:
     if provider == "ollama":
         return ""
     return param_get.GetString(_key_entry(provider), "")
+
+
+def get_openai_auth_method(param_get) -> str:
+    method = param_get.GetString("OpenAIAuthMethod", "api_key")
+    return method if method in OPENAI_AUTH_METHODS else "api_key"
+
+
+def set_openai_auth_method(param_get, method: str) -> None:
+    if method not in OPENAI_AUTH_METHODS:
+        raise ValueError("Unsupported OpenAI authentication method")
+    param_get.SetString("OpenAIAuthMethod", method)
 
 
 def get_api_base(param_get, provider: str) -> str:
@@ -309,6 +322,9 @@ def load_settings(param_get) -> "Settings":
         mark_inferred_features=param_get.GetBool(
             "MarkInferredFeatures", False),
         on_demand_render=param_get.GetBool("OnDemandRender", True),
+        openai_auth_method=(
+            get_openai_auth_method(param_get)
+            if provider == "openai" else "api_key"),
     )
 
 
@@ -354,6 +370,8 @@ def save_settings(param_get, settings: "Settings") -> None:
     param_get.SetString("FidelityTarget", settings.fidelity_target)
     param_get.SetBool("MarkInferredFeatures", settings.mark_inferred_features)
     param_get.SetBool("OnDemandRender", settings.on_demand_render)
+    if settings.model.startswith("openai/"):
+        param_get.SetString("OpenAIAuthMethod", settings.openai_auth_method)
     if "/" in settings.model:
         provider, bare = settings.model.split("/", 1)
         if provider in PROVIDERS:
