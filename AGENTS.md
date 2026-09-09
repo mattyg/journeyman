@@ -86,3 +86,17 @@ FreeCAD interpreter and is therefore not the supported full-suite command.
 - Update or add focused tests whenever an interface or invariant changes.
 - Keep `README.md` concise and user-oriented; implementation and agent guidance
   belongs here.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repository's GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five canonical default labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.

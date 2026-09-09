@@ -1,0 +1,10 @@
+skills:
+  enabled: true
+  enableCodexUser: false
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enablePiUser: false
+  enablePiProject: false
+  enableAgentsUser: false
+  enableAgentsProject: true
+  customDirectories: []
